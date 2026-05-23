@@ -1,38 +1,60 @@
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { Sidebar } from '@/components/layout/sidebar'
+
 /**
  * Layout del dashboard — Kivo
  *
- * Incluye sidebar de navegación y header.
- * Los componentes de navegación se implementan en pasos posteriores.
- * Por ahora provee la estructura base.
+ * Server Component: verifica auth y obtiene datos de org/usuario.
+ * Pasa los datos al Sidebar (Client Component).
  */
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode
 }) {
+  const supabase = createClient()
+
+  // Verificar sesión (round-trip a Supabase Auth)
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  // Obtener org y rol — si no tiene org, estado inválido
+  const { data: orgUserRaw } = await supabase
+    .from('organization_users')
+    .select('org_id, rol')
+    .eq('user_id', user.id)
+    .single()
+
+  const orgUser = orgUserRaw as { org_id: string; rol: string } | null
+
+  if (!orgUser) {
+    // Usuario sin organización: puede estar en flujo de invitación
+    redirect('/invite')
+  }
+
+  const { data: orgRaw } = await supabase
+    .from('organizations')
+    .select('nombre')
+    .eq('id', orgUser.org_id)
+    .single()
+
+  const org = orgRaw as { nombre: string } | null
+
   return (
-    <div className="flex min-h-screen bg-background">
-      {/* Sidebar — se implementa en Paso 4+ */}
-      <aside className="hidden w-64 border-r bg-card lg:block">
-        <div className="flex h-16 items-center border-b px-6">
-          <span className="text-xl font-bold text-primary">Kivo</span>
-        </div>
-        <nav className="p-4">
-          <p className="text-xs text-muted-foreground">Navegación en paso 4+</p>
-        </nav>
-      </aside>
+    <div className="flex h-screen overflow-hidden bg-zinc-50">
+      <Sidebar
+        orgName={org?.nombre ?? 'Mi Organización'}
+        userEmail={user.email ?? ''}
+        userRole={orgUser.rol}
+      />
 
-      {/* Contenido principal */}
-      <div className="flex flex-1 flex-col">
-        {/* Header — se implementa en Paso 4+ */}
-        <header className="flex h-16 items-center border-b px-6">
-          <p className="text-sm text-muted-foreground">Header en paso 4+</p>
-        </header>
-
-        <main className="flex-1 p-6">
-          {children}
-        </main>
-      </div>
+      <main className="flex-1 overflow-y-auto">
+        {children}
+      </main>
     </div>
-  );
+  )
 }
