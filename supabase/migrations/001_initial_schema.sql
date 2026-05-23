@@ -11,7 +11,9 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ────────────────────────────────────────────────────────────
--- FUNCIÓN HELPER PARA TRIGGERS (sin dependencias de tablas)
+-- FUNCIONES HELPER
+-- Todas usan LANGUAGE plpgsql: las referencias a tablas se resuelven
+-- en runtime, no en CREATE → el orden con respecto a las tablas no importa.
 -- ────────────────────────────────────────────────────────────
 
 -- Actualiza updated_at automáticamente en cada UPDATE.
@@ -25,8 +27,43 @@ BEGIN
 END;
 $$;
 
--- NOTA: get_user_org_id() y get_user_rol() se definen DESPUÉS de las tablas
--- porque LANGUAGE SQL valida las referencias a tablas en el momento de CREATE.
+-- Retorna el org_id del usuario autenticado.
+-- SECURITY DEFINER: lee organization_users sin restricciones de RLS (bypass).
+-- STABLE: resultado cacheable dentro de la misma transacción.
+CREATE OR REPLACE FUNCTION get_user_org_id()
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $$
+DECLARE
+  v_org_id UUID;
+BEGIN
+  SELECT org_id INTO v_org_id
+  FROM organization_users
+  WHERE user_id = auth.uid()
+  LIMIT 1;
+  RETURN v_org_id;
+END;
+$$;
+
+-- Retorna el rol del usuario autenticado ('admin' | 'pm' | 'viewer').
+CREATE OR REPLACE FUNCTION get_user_rol()
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $$
+DECLARE
+  v_rol TEXT;
+BEGIN
+  SELECT rol INTO v_rol
+  FROM organization_users
+  WHERE user_id = auth.uid()
+  LIMIT 1;
+  RETURN v_rol;
+END;
+$$;
 
 -- ────────────────────────────────────────────────────────────
 -- TABLAS (orden por dependencias de FK)
@@ -322,40 +359,6 @@ CREATE INDEX IF NOT EXISTS idx_alertas_nivel         ON alertas(nivel);
 CREATE INDEX IF NOT EXISTS idx_audit_org_id          ON audit_log(org_id);
 CREATE INDEX IF NOT EXISTS idx_audit_tabla           ON audit_log(tabla, registro_id);
 
-
--- ────────────────────────────────────────────────────────────
--- FUNCIONES HELPER RLS
--- Definidas DESPUÉS de las tablas porque LANGUAGE SQL valida
--- referencias a tablas en el momento de CREATE FUNCTION.
--- ────────────────────────────────────────────────────────────
-
--- Retorna el org_id del usuario autenticado.
--- SECURITY DEFINER + STABLE permite usarla eficientemente en políticas RLS
--- y garantiza que lee organization_users sin restricciones de RLS (bypasses RLS).
-CREATE OR REPLACE FUNCTION get_user_org_id()
-RETURNS UUID
-LANGUAGE SQL
-SECURITY DEFINER
-STABLE
-AS $$
-  SELECT org_id
-  FROM organization_users
-  WHERE user_id = auth.uid()
-  LIMIT 1;
-$$;
-
--- Retorna el rol del usuario autenticado ('admin' | 'pm' | 'viewer').
-CREATE OR REPLACE FUNCTION get_user_rol()
-RETURNS TEXT
-LANGUAGE SQL
-SECURITY DEFINER
-STABLE
-AS $$
-  SELECT rol
-  FROM organization_users
-  WHERE user_id = auth.uid()
-  LIMIT 1;
-$$;
 
 
 -- ────────────────────────────────────────────────────────────
