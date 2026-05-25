@@ -93,14 +93,9 @@ export function GastoForm({
     pctDetraccion: pctDetraccion ?? 0,
   })
 
-  /** Cuando cambia el proveedor, pre-llenar detracción */
+  /** Cuando cambia el proveedor */
   function handleProveedorChange(proveedorId: string) {
     setValue('proveedor_id', proveedorId)
-    const prov = proveedores.find((p) => p.id === proveedorId)
-    if (prov) {
-      setValue('aplica_detraccion', prov.aplica_detraccion)
-      setValue('pct_detraccion', prov.pct_detraccion)
-    }
   }
 
   /** Convierte soles → centavos al cambiar el input */

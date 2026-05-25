@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const supabase = createClient()
   let query = supabase
     .from('proveedores')
-    .select('id, ruc, razon_social, nombre_comercial, tipo, aplica_detraccion, pct_detraccion, condicion_pago, email, created_at')
+    .select('id, ruc, tipo_documento, numero_documento, razon_social, nombre_comercial, tipo, condicion_pago, email, created_at')
     .eq('org_id', auth.orgId)
     .order('razon_social', { ascending: true })
 
@@ -62,21 +62,25 @@ export async function POST(request: Request) {
   const data = parsed.data
 
   const supabase = createClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const insertPayload: any = {
+    org_id: auth.orgId,
+    ruc: data.tipo === 'persona_juridica' ? (data.ruc ?? null) : null,
+    tipo_documento: data.tipo === 'persona_natural' ? (data.tipo_documento ?? null) : null,
+    numero_documento: data.tipo === 'persona_natural' ? (data.numero_documento ?? null) : null,
+    razon_social: data.razon_social,
+    nombre_comercial: data.nombre_comercial || null,
+    tipo: data.tipo,
+    actividad: data.actividad || null,
+    aplica_detraccion: false,
+    pct_detraccion: 0,
+    condicion_pago: data.condicion_pago || null,
+    email: data.email || null,
+    notas: data.notas || null,
+  }
   const { data: proveedor, error } = await supabase
     .from('proveedores')
-    .insert({
-      org_id: auth.orgId,
-      ruc: data.ruc,
-      razon_social: data.razon_social,
-      nombre_comercial: data.nombre_comercial || null,
-      tipo: data.tipo,
-      actividad: data.actividad || null,
-      aplica_detraccion: data.aplica_detraccion,
-      pct_detraccion: data.aplica_detraccion ? data.pct_detraccion : 0,
-      condicion_pago: data.condicion_pago || null,
-      email: data.email || null,
-      notas: data.notas || null,
-    })
+    .insert(insertPayload)
     .select()
     .single()
 

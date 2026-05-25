@@ -5,19 +5,21 @@ import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Search, Loader2 } from 'lucide-react'
-import { proveedorSchema, type ProveedorInput } from '@/lib/validations/proveedor'
+import {
+  proveedorSchema,
+  type ProveedorInput,
+  CONDICIONES_PAGO,
+  TIPOS_DOCUMENTO,
+} from '@/lib/validations/proveedor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
 import type { RucData } from '@/app/api/ruc/route'
 
 interface ProveedorFormProps {
   defaultValues?: Partial<ProveedorInput>
-  proveedorId?: string // si existe → modo edición
+  proveedorId?: string
 }
-
-const DETRACCIONES_COMUNES = [4, 9, 10, 12, 15]
 
 export function ProveedorForm({ defaultValues, proveedorId }: ProveedorFormProps) {
   const router = useRouter()
@@ -36,257 +38,229 @@ export function ProveedorForm({ defaultValues, proveedorId }: ProveedorFormProps
   } = useForm<ProveedorInput>({
     resolver: zodResolver(proveedorSchema),
     defaultValues: {
-      aplica_detraccion: false,
-      pct_detraccion: 0,
       tipo: 'persona_juridica',
       ...defaultValues,
     },
   })
 
-  const aplicaDetraccion = watch('aplica_detraccion')
+  const tipo = watch('tipo')
 
-  // ─── Lookup de RUC ───────────────────────────────────────────
   async function handleRucSearch() {
     setRucError(null)
     const ruc = rucSearch.trim()
-
     if (!/^\d{11}$/.test(ruc)) {
-      setRucError('El RUC debe tener 11 dígitos')
+      setRucError('Ingresa un RUC de 11 dígitos')
       return
     }
-
     setSearching(true)
     try {
-      const res = await fetch(`/api/ruc?numero=${ruc}`)
-      const json = await res.json() as RucData & { error?: string }
-
-      if (!res.ok) {
-        setRucError(json.error ?? 'RUC no encontrado')
+      const res = await fetch(`/api/ruc?ruc=${ruc}`)
+      const data = await res.json() as RucData | { error: string }
+      if (!res.ok || 'error' in data) {
+        setRucError(('error' in data ? data.error : null) ?? 'RUC no encontrado en SUNAT')
+        setSearching(false)
         return
       }
-
-      // Autofill
-      setValue('ruc', json.ruc)
-      setValue('razon_social', json.razon_social)
-      setValue('nombre_comercial', json.nombre_comercial ?? '')
-      setValue('tipo', json.tipo)
-      setValue('actividad', json.actividad ?? '')
+      setValue('ruc', ruc, { shouldValidate: true })
+      setValue('razon_social', data.razon_social)
+      setValue('tipo', data.tipo === 'persona_natural' ? 'persona_natural' : 'persona_juridica')
+      if (data.actividad) setValue('actividad', data.actividad)
     } catch {
-      setRucError('Error de conexión. Ingresa los datos manualmente.')
-    } finally {
-      setSearching(false)
+      setRucError('Error conectando con SUNAT')
     }
+    setSearching(false)
   }
 
-  // ─── Submit ──────────────────────────────────────────────────
   async function onSubmit(data: ProveedorInput) {
     setServerError(null)
-
     const url = proveedorId ? `/api/proveedores/${proveedorId}` : '/api/proveedores'
     const method = proveedorId ? 'PUT' : 'POST'
-
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
-
-    const json = await res.json() as { error?: string }
-
+    const json = await res.json() as { id?: string; error?: string }
     if (!res.ok) {
       setServerError(json.error ?? 'Error guardando proveedor')
       return
     }
-
     router.push('/proveedores')
     router.refresh()
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
-      {serverError && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-700">{serverError}</p>
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+
+      {/* 1. Tipo de contribuyente */}
+      <div>
+        <Label className="mb-2 block">Tipo de contribuyente *</Label>
+        <Controller
+          name="tipo"
+          control={control}
+          render={({ field }) => (
+            <div className="flex gap-3">
+              {([
+                { value: 'persona_juridica', label: 'Persona jurídica' },
+                { value: 'persona_natural',  label: 'Persona natural'  },
+              ] as const).map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                    field.value === opt.value
+                      ? 'border-zinc-900 bg-zinc-900 text-white'
+                      : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    value={opt.value}
+                    checked={field.value === opt.value}
+                    onChange={() => field.onChange(opt.value)}
+                    className="sr-only"
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          )}
+        />
+      </div>
+
+      {/* 2A. Persona jurídica → RUC + SUNAT */}
+      {tipo === 'persona_juridica' && (
+        <div>
+          <Label htmlFor="ruc-search">RUC *</Label>
+          <div className="mt-1 flex gap-2">
+            <Input
+              id="ruc-search"
+              value={rucSearch}
+              onChange={(e) => setRucSearch(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleRucSearch())}
+              placeholder="20XXXXXXXXX"
+              maxLength={11}
+              className="font-mono"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleRucSearch}
+              disabled={searching}
+              className="shrink-0 gap-1.5"
+            >
+              {searching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Buscar en SUNAT
+            </Button>
+          </div>
+          {rucError && <p className="mt-1 text-xs text-red-600">{rucError}</p>}
+          {errors.ruc && <p className="mt-1 text-xs text-red-600">{errors.ruc.message}</p>}
+          <p className="mt-1 text-xs text-zinc-400">Busca el RUC para autocompletar desde SUNAT.</p>
         </div>
       )}
 
-      {/* ── Sección RUC ── */}
-      <section className="rounded-lg border border-zinc-200 bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold text-zinc-900">Datos tributarios</h3>
-        <div className="space-y-4">
-
-          {/* Buscador de RUC */}
-          <div className="space-y-1.5">
-            <Label htmlFor="rucSearch">RUC</Label>
-            <div className="flex gap-2">
-              <Input
-                id="rucSearch"
-                type="text"
-                inputMode="numeric"
-                maxLength={11}
-                placeholder="20123456789"
-                value={rucSearch}
-                onChange={(e) => {
-                  const v = e.target.value.replace(/\D/g, '').slice(0, 11)
-                  setRucSearch(v)
-                  setValue('ruc', v)
-                  setRucError(null)
-                }}
-                className="max-w-[200px]"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleRucSearch}
-                disabled={searching || rucSearch.length !== 11}
-              >
-                {searching ? (
-                  <Loader2 size={15} className="animate-spin" />
-                ) : (
-                  <Search size={15} />
-                )}
-                <span className="ml-1.5">Buscar en SUNAT</span>
-              </Button>
-            </div>
-            {rucError && <p className="text-xs text-red-600">{rucError}</p>}
-            {errors.ruc && <p className="text-xs text-red-600">{errors.ruc.message}</p>}
-            <input type="hidden" {...register('ruc')} />
-          </div>
-
-          {/* Razón social */}
-          <div className="space-y-1.5">
-            <Label htmlFor="razon_social">Razón social *</Label>
-            <Input
-              id="razon_social"
-              placeholder="EMPRESA S.A.C."
-              {...register('razon_social')}
-              aria-invalid={!!errors.razon_social}
-            />
-            {errors.razon_social && (
-              <p className="text-xs text-red-600">{errors.razon_social.message}</p>
-            )}
-          </div>
-
-          {/* Nombre comercial */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nombre_comercial">
-              Nombre comercial <span className="text-zinc-400">(opcional)</span>
+      {/* 2B. Persona natural → documento opcional */}
+      {tipo === 'persona_natural' && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="tipo_documento">
+              Tipo de documento <span className="text-zinc-400">(opcional)</span>
             </Label>
-            <Input
-              id="nombre_comercial"
-              placeholder="Como aparece en facturas"
-              {...register('nombre_comercial')}
-            />
-          </div>
-
-          {/* Tipo */}
-          <div className="space-y-1.5">
-            <Label htmlFor="tipo">Tipo de contribuyente *</Label>
-            <select
-              id="tipo"
-              {...register('tipo')}
-              className="flex h-9 w-full max-w-[260px] rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-950 focus:ring-offset-1"
-            >
-              <option value="persona_juridica">Persona jurídica</option>
-              <option value="persona_natural">Persona natural</option>
-            </select>
-          </div>
-
-          {/* Actividad */}
-          <div className="space-y-1.5">
-            <Label htmlFor="actividad">
-              Actividad económica <span className="text-zinc-400">(opcional)</span>
-            </Label>
-            <Input
-              id="actividad"
-              placeholder="Ej: Servicios de publicidad"
-              {...register('actividad')}
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Sección Detracción ── */}
-      <section className="rounded-lg border border-zinc-200 bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold text-zinc-900">Detracción SPOT</h3>
-        <div className="space-y-4">
-
-          {/* Toggle detracción */}
-          <div className="flex items-center gap-3">
             <Controller
-              name="aplica_detraccion"
+              name="tipo_documento"
               control={control}
               render={({ field }) => (
-                <Checkbox
-                  id="aplica_detraccion"
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                />
+                <select
+                  id="tipo_documento"
+                  className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400"
+                  value={field.value ?? ''}
+                  onChange={(e) => field.onChange(e.target.value || undefined)}
+                >
+                  <option value="">Sin documento</option>
+                  {TIPOS_DOCUMENTO.map((d) => (
+                    <option key={d.value} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
               )}
             />
-            <Label htmlFor="aplica_detraccion" className="cursor-pointer">
-              Aplica detracción SPOT
-            </Label>
           </div>
-
-          {/* Porcentaje */}
-          {aplicaDetraccion && (
-            <div className="space-y-1.5 pl-7">
-              <Label htmlFor="pct_detraccion">Porcentaje (%)</Label>
-              <div className="flex flex-wrap gap-2">
-                {DETRACCIONES_COMUNES.map((pct) => (
-                  <button
-                    key={pct}
-                    type="button"
-                    onClick={() => setValue('pct_detraccion', pct)}
-                    className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-                      watch('pct_detraccion') === pct
-                        ? 'border-zinc-900 bg-zinc-900 text-white'
-                        : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300'
-                    }`}
-                  >
-                    {pct}%
-                  </button>
-                ))}
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="pct_detraccion"
-                    type="number"
-                    min={0}
-                    max={100}
-                    className="w-20"
-                    {...register('pct_detraccion', { valueAsNumber: true })}
-                  />
-                  <span className="text-sm text-zinc-500">%</span>
-                </div>
-              </div>
-              {errors.pct_detraccion && (
-                <p className="text-xs text-red-600">{errors.pct_detraccion.message}</p>
-              )}
-            </div>
-          )}
+          <div>
+            <Label htmlFor="numero_documento">
+              Número de documento <span className="text-zinc-400">(opcional)</span>
+            </Label>
+            <Input
+              id="numero_documento"
+              placeholder="Ej: 12345678"
+              className="mt-1 font-mono"
+              {...register('numero_documento')}
+            />
+          </div>
         </div>
-      </section>
+      )}
 
-      {/* ── Sección Contacto / Pago ── */}
-      <section className="rounded-lg border border-zinc-200 bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold text-zinc-900">Contacto y condiciones</h3>
+      {/* 3. Razón social / Nombre */}
+      <div>
+        <Label htmlFor="razon_social">
+          {tipo === 'persona_natural' ? 'Nombre completo *' : 'Razón social *'}
+        </Label>
+        <Input
+          id="razon_social"
+          placeholder={tipo === 'persona_natural' ? 'Ej: Juan Pérez García' : 'Ej: Empresa S.A.C.'}
+          className="mt-1"
+          {...register('razon_social')}
+        />
+        {errors.razon_social && (
+          <p className="mt-1 text-xs text-red-600">{errors.razon_social.message}</p>
+        )}
+      </div>
+
+      {/* 4. Nombre comercial */}
+      <div>
+        <Label htmlFor="nombre_comercial">
+          Nombre comercial <span className="text-zinc-400">(opcional)</span>
+        </Label>
+        <Input
+          id="nombre_comercial"
+          placeholder="Como aparece en facturas"
+          className="mt-1"
+          {...register('nombre_comercial')}
+        />
+      </div>
+
+      {/* 5. Actividad económica */}
+      <div>
+        <Label htmlFor="actividad">
+          Actividad económica <span className="text-zinc-400">(opcional)</span>
+        </Label>
+        <Input
+          id="actividad"
+          placeholder="Ej: Servicios de publicidad"
+          className="mt-1"
+          {...register('actividad')}
+        />
+      </div>
+
+      {/* 6. Contacto y condiciones */}
+      <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-5 space-y-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+          Contacto y condiciones
+        </p>
         <div className="grid gap-4 sm:grid-cols-2">
-
-          {/* Condición de pago */}
-          <div className="space-y-1.5">
+          <div>
             <Label htmlFor="condicion_pago">
               Condición de pago <span className="text-zinc-400">(opcional)</span>
             </Label>
-            <Input
+            <select
               id="condicion_pago"
-              placeholder="Ej: 30 días"
+              className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400"
               {...register('condicion_pago')}
-            />
+            >
+              <option value="">Seleccionar…</option>
+              {CONDICIONES_PAGO.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
           </div>
-
-          {/* Email */}
-          <div className="space-y-1.5">
+          <div>
             <Label htmlFor="email">
               Email <span className="text-zinc-400">(opcional)</span>
             </Label>
@@ -294,40 +268,39 @@ export function ProveedorForm({ defaultValues, proveedorId }: ProveedorFormProps
               id="email"
               type="email"
               placeholder="proveedor@empresa.com"
+              className="mt-1"
               {...register('email')}
             />
             {errors.email && (
-              <p className="text-xs text-red-600">{errors.email.message}</p>
+              <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>
             )}
           </div>
-
-          {/* Notas */}
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="notas">
-              Notas <span className="text-zinc-400">(opcional)</span>
-            </Label>
-            <textarea
-              id="notas"
-              rows={3}
-              placeholder="Observaciones, condiciones especiales…"
-              {...register('notas')}
-              className="flex w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-950 focus:ring-offset-1 resize-none"
-            />
-          </div>
         </div>
-      </section>
+        <div>
+          <Label htmlFor="notas">
+            Notas <span className="text-zinc-400">(opcional)</span>
+          </Label>
+          <textarea
+            id="notas"
+            rows={3}
+            placeholder="Información adicional sobre este proveedor…"
+            className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-zinc-400 resize-none"
+            {...register('notas')}
+          />
+        </div>
+      </div>
 
-      {/* Acciones */}
-      <div className="flex gap-3">
+      {serverError && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {serverError}
+        </div>
+      )}
+
+      <div className="flex gap-3 pt-1">
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 size={15} className="mr-2 animate-spin" />}
-          {proveedorId ? 'Guardar cambios' : 'Crear proveedor'}
+          {isSubmitting ? 'Guardando…' : proveedorId ? 'Guardar cambios' : 'Crear proveedor'}
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => router.push('/proveedores')}
-        >
+        <Button type="button" variant="outline" onClick={() => router.push('/proveedores')}>
           Cancelar
         </Button>
       </div>

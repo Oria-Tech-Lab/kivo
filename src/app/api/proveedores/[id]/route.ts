@@ -47,20 +47,23 @@ export async function PUT(request: Request, { params }: Params) {
   const data = parsed.data
   const supabase = createClient()
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updatePayload: any = {
+    ruc: data.tipo === 'persona_juridica' ? (data.ruc ?? null) : null,
+    tipo_documento: data.tipo === 'persona_natural' ? (data.tipo_documento ?? null) : null,
+    numero_documento: data.tipo === 'persona_natural' ? (data.numero_documento ?? null) : null,
+    razon_social: data.razon_social,
+    nombre_comercial: data.nombre_comercial || null,
+    tipo: data.tipo,
+    actividad: data.actividad || null,
+    condicion_pago: data.condicion_pago || null,
+    email: data.email || null,
+    notas: data.notas || null,
+  }
+
   const { data: proveedor, error } = await supabase
     .from('proveedores')
-    .update({
-      ruc: data.ruc,
-      razon_social: data.razon_social,
-      nombre_comercial: data.nombre_comercial || null,
-      tipo: data.tipo,
-      actividad: data.actividad || null,
-      aplica_detraccion: data.aplica_detraccion,
-      pct_detraccion: data.aplica_detraccion ? data.pct_detraccion : 0,
-      condicion_pago: data.condicion_pago || null,
-      email: data.email || null,
-      notas: data.notas || null,
-    })
+    .update(updatePayload)
     .eq('id', params.id)
     .eq('org_id', auth.orgId)
     .select()

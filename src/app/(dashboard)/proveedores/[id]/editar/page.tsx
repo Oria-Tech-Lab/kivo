@@ -29,23 +29,24 @@ export default async function EditarProveedorPage({
 
   if (!proveedorRaw) notFound()
 
-  const proveedor = proveedorRaw as {
+  const proveedor = proveedorRaw as unknown as {
     id: string
-    ruc: string
+    ruc: string | null
+    tipo_documento: 'dni' | 'ce' | 'pasaporte' | 'ruc' | null
+    numero_documento: string | null
     razon_social: string
     nombre_comercial: string | null
     tipo: 'persona_natural' | 'persona_juridica'
     actividad: string | null
-    aplica_detraccion: boolean
-    pct_detraccion: number
     condicion_pago: string | null
     email: string | null
     notas: string | null
   }
 
+  const identificador = proveedor.ruc ?? proveedor.numero_documento ?? ''
+
   return (
     <div className="p-6 max-w-3xl space-y-6">
-      {/* Breadcrumb */}
       <div>
         <Link
           href="/proveedores"
@@ -57,19 +58,21 @@ export default async function EditarProveedorPage({
         <h1 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900">
           Editar proveedor
         </h1>
-        <p className="mt-1 font-mono text-xs text-zinc-400">{proveedor.ruc}</p>
+        {identificador && (
+          <p className="mt-1 font-mono text-xs text-zinc-400">{identificador}</p>
+        )}
       </div>
 
       <ProveedorForm
         proveedorId={proveedor.id}
         defaultValues={{
-          ruc: proveedor.ruc,
+          tipo: proveedor.tipo,
+          ruc: proveedor.ruc ?? '',
+          tipo_documento: proveedor.tipo_documento ?? undefined,
+          numero_documento: proveedor.numero_documento ?? '',
           razon_social: proveedor.razon_social,
           nombre_comercial: proveedor.nombre_comercial ?? '',
-          tipo: proveedor.tipo,
           actividad: proveedor.actividad ?? '',
-          aplica_detraccion: proveedor.aplica_detraccion,
-          pct_detraccion: proveedor.pct_detraccion,
           condicion_pago: proveedor.condicion_pago ?? '',
           email: proveedor.email ?? '',
           notas: proveedor.notas ?? '',
