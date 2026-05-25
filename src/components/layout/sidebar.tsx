@@ -12,6 +12,7 @@ import {
   Wallet,
   Settings,
   LogOut,
+  Landmark,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
@@ -47,6 +48,11 @@ const navItems = [
     label: 'Gastos',
     href: '/gastos',
     icon: Receipt,
+  },
+  {
+    label: 'GG',
+    href: '/gastos-generales',
+    icon: Landmark,
   },
   {
     label: 'Caja',

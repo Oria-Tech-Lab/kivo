@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ChevronLeft, Loader2, CheckCircle, Clock, AlertTriangle,
-  FileText, ExternalLink, Trash2
+  FileText, ExternalLink, Trash2, Pencil
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -202,6 +202,12 @@ export default function GastoDetallePage() {
 
           {/* Acciones rápidas */}
           <div className="flex gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/gastos/${id}/editar`}>
+                <Pencil size={14} className="mr-1.5" />
+                Editar
+              </Link>
+            </Button>
             {gasto.estado_pago === 'pendiente' && (
               <Button
                 variant="outline"
