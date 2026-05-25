@@ -7,6 +7,7 @@ import { ChevronLeft, Loader2, Trash2, Pencil, Building2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatMoney, formatDate } from '@/lib/utils'
+import { AsignarPanel } from './asignar-panel'
 
 const MESES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -59,16 +60,22 @@ export default function GastoGeneralDetallePage() {
   const [, startTransition] = useTransition()
 
   const [gg, setGg] = useState<GastoGeneral | null>(null)
+  const [proyectos, setProyectos] = useState<Array<{ id: string; nombre: string }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
-      const res = await fetch(`/api/gastos-generales/${id}`)
-      if (!res.ok) { setError('Gasto general no encontrado'); setLoading(false); return }
-      const data = await res.json() as GastoGeneral
+      const [ggRes, proyRes] = await Promise.all([
+        fetch(`/api/gastos-generales/${id}`),
+        fetch('/api/proyectos?estado=activo'),
+      ])
+      if (!ggRes.ok) { setError('Gasto general no encontrado'); setLoading(false); return }
+      const data = await ggRes.json() as GastoGeneral
+      const proyData = proyRes.ok ? (await proyRes.json() as Array<{ id: string; nombre: string }>) : []
       setGg(data)
+      setProyectos(proyData)
       setLoading(false)
     }
     void load()
@@ -257,48 +264,13 @@ export default function GastoGeneralDetallePage() {
         )}
       </div>
 
-      {/* Asignaciones a proyectos */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-5">
-        <h2 className="mb-4 text-sm font-semibold text-zinc-900">
-          Asignaciones a proyectos
-          {gg.asignaciones.length > 0 && (
-            <span className="ml-2 text-zinc-400 font-normal">({gg.asignaciones.length})</span>
-          )}
-        </h2>
-        {gg.asignaciones.length === 0 ? (
-          <p className="text-sm text-zinc-400">
-            Sin asignaciones. Las asignaciones se realizan desde el detalle del proyecto.
-          </p>
-        ) : (
-          <div className="divide-y divide-zinc-100">
-            {gg.asignaciones.map((a) => (
-              <div key={a.id} className="flex items-center justify-between py-2.5">
-                <div>
-                  {a.proyecto ? (
-                    <Link
-                      href={`/proyectos/${a.proyecto.id}`}
-                      className="text-sm font-medium text-zinc-800 hover:underline"
-                    >
-                      {a.proyecto.nombre}
-                    </Link>
-                  ) : (
-                    <span className="text-sm text-zinc-400">Proyecto eliminado</span>
-                  )}
-                  <div className="text-xs text-zinc-400">{formatDate(a.fecha)}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono text-sm font-medium text-zinc-900">
-                    {formatMoney(a.monto)}
-                  </div>
-                  {a.pct && (
-                    <div className="text-xs text-zinc-400">{Number(a.pct).toFixed(1)}%</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Asignaciones a proyectos — panel interactivo */}
+      <AsignarPanel
+        gastoGeneralId={gg.id}
+        totalGG={gg.total}
+        asignacionesIniciales={gg.asignaciones}
+        proyectos={proyectos}
+      />
 
       {actionError && (
         <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
