@@ -2,6 +2,8 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { LoginForm } from '@/components/forms/login-form'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Iniciar sesión — Kivo',
   description: 'Accede a tu cuenta de Kivo',
