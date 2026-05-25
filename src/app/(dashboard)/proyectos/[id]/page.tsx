@@ -6,7 +6,7 @@ import { getUserRole } from '@/lib/supabase/server'
 import { ChevronLeft, Pencil, Calendar, Building2, Tag, AlertTriangle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatMoney, formatPercent } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,11 +82,37 @@ export default async function ProyectoDetallePage({ params }: Props) {
     } | null
   }
 
-  // Conteo de gastos del proyecto
-  const { count: gastoCount } = await supabase
-    .from('gastos')
-    .select('id', { count: 'exact', head: true })
-    .eq('proyecto_id', params.id)
+  // KPIs financieros en paralelo
+  const [presupuestosRes, gastosRes] = await Promise.all([
+    // Presupuestos aprobados del proyecto
+    supabase
+      .from('presupuestos')
+      .select('total, igv_total')
+      .eq('proyecto_id', params.id)
+      .eq('estado', 'aprobado'),
+
+    // Gastos registrados del proyecto
+    supabase
+      .from('gastos')
+      .select('total, igv')
+      .eq('proyecto_id', params.id),
+  ])
+
+  const presupuestadoTotal = (presupuestosRes.data ?? []).reduce(
+    (s, p) => s + ((p as { total: number }).total ?? 0), 0
+  )
+  const igvDebito = (presupuestosRes.data ?? []).reduce(
+    (s, p) => s + ((p as { igv_total: number }).igv_total ?? 0), 0
+  )
+
+  const gastosData = (gastosRes.data ?? []) as Array<{ total: number; igv: number }>
+  const gastadoTotal = gastosData.reduce((s, g) => s + (g.total ?? 0), 0)
+  const igvCredito = gastosData.reduce((s, g) => s + (g.igv ?? 0), 0)
+
+  const gastoCount = gastosData.length
+  const margenBruto = presupuestadoTotal - gastadoTotal
+  const margenPct = presupuestadoTotal > 0 ? (margenBruto / presupuestadoTotal) * 100 : null
+  const posicionIGV = igvDebito - igvCredito // positivo = debo pagar; negativo = saldo a favor
 
   const estadoConfig = ESTADO_CONFIG[proyecto.estado] ?? { label: proyecto.estado, className: '' }
   const canEdit = rol === 'admin' || rol === 'pm'
@@ -137,20 +163,95 @@ export default async function ProyectoDetallePage({ params }: Props) {
         </div>
       </div>
 
-      {/* KPIs — valores reales en M2/M3 */}
+      {/* KPIs financieros */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          { label: 'Presupuestado', value: '—', sub: 'Sin presupuesto aún' },
-          { label: 'Gastado', value: `${gastoCount ?? 0} gasto${gastoCount !== 1 ? 's' : ''}`, sub: 'Registrados' },
-          { label: 'Margen bruto', value: '—', sub: 'Pendiente M3' },
-          { label: 'Posición IGV', value: '—', sub: 'Pendiente M3' },
-        ].map(({ label, value, sub }) => (
-          <div key={label} className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">{label}</p>
-            <p className="mt-2 text-xl font-bold tabular-nums text-zinc-900">{value}</p>
-            <p className="mt-0.5 text-xs text-zinc-400">{sub}</p>
-          </div>
-        ))}
+        {/* Presupuestado aprobado */}
+        <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Presupuestado</p>
+          <p className="mt-2 text-xl font-bold tabular-nums font-mono text-zinc-900">
+            {presupuestadoTotal > 0 ? formatMoney(presupuestadoTotal) : '—'}
+          </p>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            {presupuestadoTotal > 0 ? 'Total aprobado' : 'Sin presupuesto aprobado'}
+          </p>
+        </div>
+
+        {/* Gastado */}
+        <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Gastado</p>
+          <p className="mt-2 text-xl font-bold tabular-nums font-mono text-zinc-900">
+            {gastadoTotal > 0 ? formatMoney(gastadoTotal) : '—'}
+          </p>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            {gastoCount > 0 ? `${gastoCount} gasto${gastoCount !== 1 ? 's' : ''}` : 'Sin gastos aún'}
+          </p>
+        </div>
+
+        {/* Margen bruto */}
+        <div className={`rounded-lg border p-5 shadow-sm ${
+          margenPct === null ? 'border-zinc-200 bg-white'
+          : margenPct < 0 ? 'border-red-200 bg-red-50'
+          : margenPct < 20 ? 'border-amber-200 bg-amber-50'
+          : 'border-emerald-200 bg-emerald-50'
+        }`}>
+          <p className={`text-xs font-medium uppercase tracking-wide ${
+            margenPct === null ? 'text-zinc-400'
+            : margenPct < 0 ? 'text-red-500'
+            : margenPct < 20 ? 'text-amber-600'
+            : 'text-emerald-600'
+          }`}>
+            Margen bruto
+          </p>
+          <p className={`mt-2 text-xl font-bold tabular-nums font-mono ${
+            margenPct === null ? 'text-zinc-900'
+            : margenPct < 0 ? 'text-red-700'
+            : margenPct < 20 ? 'text-amber-900'
+            : 'text-emerald-900'
+          }`}>
+            {presupuestadoTotal > 0 ? formatMoney(margenBruto) : '—'}
+          </p>
+          <p className={`mt-0.5 text-xs ${
+            margenPct === null ? 'text-zinc-400'
+            : margenPct < 0 ? 'text-red-600'
+            : margenPct < 20 ? 'text-amber-700'
+            : 'text-emerald-700'
+          }`}>
+            {margenPct !== null ? `${formatPercent(margenPct)} sobre presupuesto` : 'Sin datos suficientes'}
+          </p>
+        </div>
+
+        {/* Posición IGV */}
+        <div className={`rounded-lg border p-5 shadow-sm ${
+          igvDebito === 0 && igvCredito === 0 ? 'border-zinc-200 bg-white'
+          : posicionIGV > 0 ? 'border-blue-200 bg-blue-50'
+          : 'border-emerald-200 bg-emerald-50'
+        }`}>
+          <p className={`text-xs font-medium uppercase tracking-wide ${
+            igvDebito === 0 && igvCredito === 0 ? 'text-zinc-400'
+            : posicionIGV > 0 ? 'text-blue-600'
+            : 'text-emerald-600'
+          }`}>
+            Posición IGV
+          </p>
+          <p className={`mt-2 text-xl font-bold tabular-nums font-mono ${
+            igvDebito === 0 && igvCredito === 0 ? 'text-zinc-900'
+            : posicionIGV > 0 ? 'text-blue-900'
+            : 'text-emerald-900'
+          }`}>
+            {igvDebito > 0 || igvCredito > 0 ? formatMoney(Math.abs(posicionIGV)) : '—'}
+          </p>
+          <p className={`mt-0.5 text-xs ${
+            igvDebito === 0 && igvCredito === 0 ? 'text-zinc-400'
+            : posicionIGV > 0 ? 'text-blue-700'
+            : 'text-emerald-700'
+          }`}>
+            {igvDebito === 0 && igvCredito === 0
+              ? 'Sin movimientos IGV'
+              : posicionIGV > 0
+              ? 'A pagar a SUNAT'
+              : 'Saldo a favor'}
+          </p>
+        </div>
       </div>
 
       {/* Datos del proyecto */}
