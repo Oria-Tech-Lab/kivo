@@ -80,6 +80,12 @@ export async function POST(req: Request, { params }: Params) {
     .select()
     .single()
 
-  if (error) return apiError('Error creando item', 500, error)
+  if (error) {
+    // Retornar detalle para diagnóstico — quitar en producción si es sensible
+    return NextResponse.json(
+      { error: 'Error creando item', code: error.code, details: error.message, hint: error.hint },
+      { status: 500 }
+    )
+  }
   return NextResponse.json(item, { status: 201 })
 }

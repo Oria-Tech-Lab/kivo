@@ -207,8 +207,9 @@ export function ProyectoDetailClient({
         setItems(prev => [...prev, newItem])
         setTimeout(() => setEditingCell({ id: newItem.id, field: focusField }), 50)
       } else {
-        const body = await res.json().catch(() => ({})) as { error?: string }
-        showError(body.error ?? `Error ${res.status} al crear el ítem. ¿Ejecutaste la migración 003 en Supabase?`)
+        const body = await res.json().catch(() => ({})) as { error?: string; code?: string; details?: string; hint?: string }
+        const detail = [body.code, body.details, body.hint].filter(Boolean).join(' — ')
+        showError(detail ? `${body.error}: ${detail}` : (body.error ?? `Error ${res.status}`))
       }
     } catch {
       showError('Error de red. Verifica tu conexión.')
