@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ChevronLeft, Pencil, Plus, Trash2, Check, X,
-  FileText, Wallet, TrendingUp, BarChart2, PanelRight,
+  FileText, Wallet, TrendingUp, BarChart3, PanelRight,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -99,7 +99,8 @@ export function ProyectoDetailClient({
     : items
 
   const totals = items.reduce((acc, item) => {
-    const igv = item.tipo_comprobante === 'factura' ? Math.round(item.gasto_real * 18 / 118) : 0
+    // gasto_real se trata como subtotal sin IGV; IGV = subtotal * 0.18
+    const igv = item.tipo_comprobante === 'factura' ? Math.round(item.gasto_real * 0.18) : 0
     const varianza = item.costo_estimado > 0 ? item.gasto_real - item.costo_estimado : 0
     return {
       costo_estimado: acc.costo_estimado + item.costo_estimado,
@@ -111,13 +112,18 @@ export function ProyectoDetailClient({
     }
   }, { costo_estimado: 0, gasto_real: 0, precio_venta: 0, igv: 0, margen: 0, varianza: 0 })
 
-  const avancePct   = totals.costo_estimado > 0
+  const avancePct    = totals.costo_estimado > 0
     ? Math.min((totals.gasto_real / totals.costo_estimado) * 100, 999)
     : null
-  const margenPct   = totals.precio_venta > 0
+  // margenPct sobre precio_venta (usado en totals row)
+  const margenPct    = totals.precio_venta > 0
     ? (totals.margen / totals.precio_venta) * 100
     : null
-  const varianzaPct = totals.costo_estimado > 0
+  // margenSobreCosto = margen / gasto_real (subtítulo KPI card, como en el diseño)
+  const margenSobreCosto = totals.gasto_real > 0
+    ? (totals.margen / totals.gasto_real) * 100
+    : null
+  const varianzaPct  = totals.costo_estimado > 0
     ? (totals.varianza / totals.costo_estimado) * 100
     : null
 
@@ -247,17 +253,17 @@ export function ProyectoDetailClient({
       {/* Margen */}
       <KpiCard
         label="Margen Bruto"
-        icon={<TrendingUp size={15} className={margenPct === null ? 'text-zinc-400' : margenPct < 15 ? 'text-red-500' : margenPct < 30 ? 'text-amber-500' : 'text-emerald-500'} />}
+        icon={<TrendingUp size={15} className={margenSobreCosto === null ? 'text-zinc-400' : margenSobreCosto < 15 ? 'text-red-500' : margenSobreCosto < 30 ? 'text-amber-500' : 'text-emerald-500'} />}
         value={totals.precio_venta > 0 || totals.gasto_real > 0 ? formatMoney(totals.margen) : '—'}
-        sub={margenPct !== null ? `${margenPct.toFixed(1)}% sobre precio venta` : 'Sin datos de venta'}
-        progress={margenPct !== null ? Math.max(0, Math.min(margenPct, 100)) : undefined}
-        progressColor={margenPct === null ? 'bg-zinc-300' : margenPct < 0 ? 'bg-red-500' : margenPct < 15 ? 'bg-red-400' : margenPct < 30 ? 'bg-amber-400' : 'bg-emerald-500'}
-        cardBg={margenPct === null ? '' : margenPct < 15 ? 'bg-red-50 border-red-200' : margenPct < 30 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}
+        sub={margenSobreCosto !== null ? `${margenSobreCosto.toFixed(1)}% sobre costo real` : 'Sin datos suficientes'}
+        progress={margenSobreCosto !== null ? Math.max(0, Math.min(margenSobreCosto, 100)) : undefined}
+        progressColor={margenSobreCosto === null ? 'bg-zinc-300' : margenSobreCosto < 0 ? 'bg-red-500' : margenSobreCosto < 15 ? 'bg-red-400' : margenSobreCosto < 30 ? 'bg-amber-400' : 'bg-emerald-500'}
+        cardBg={margenSobreCosto === null ? '' : margenSobreCosto < 15 ? 'bg-red-50 border-red-200' : margenSobreCosto < 30 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}
       />
       {/* IGV */}
       <KpiCard
         label="Posición IGV"
-        icon={<BarChart2 size={15} className="text-zinc-400" />}
+        icon={<BarChart3 size={15} className="text-zinc-400" />}
         value={totals.igv > 0 ? formatMoney(totals.igv) : '—'}
         sub={totals.igv > 0 ? 'Crédito fiscal acumulado' : 'Sin facturas registradas'}
         progress={totals.igv > 0 && totals.gasto_real > 0
@@ -678,10 +684,16 @@ function ItemRow({
 
   const status  = getItemStatus(item)
   const cfg     = STATUS_CONFIG[status]
-  const igv     = item.tipo_comprobante === 'factura' ? Math.round(item.gasto_real * 18 / 118) : 0
-  const margen  = item.precio_venta - item.gasto_real
+  // gasto_real es subtotal sin IGV → IGV = subtotal * 0.18
+  const igv     = item.tipo_comprobante === 'factura' ? Math.round(item.gasto_real * 0.18) : 0
+  const margenAmt   = item.precio_venta - item.gasto_real
+  const margenRowPct = item.precio_venta > 0 ? (margenAmt / item.precio_venta) * 100 : null
   const varianza = item.costo_estimado > 0 ? item.gasto_real - item.costo_estimado : 0
   const varianzaPct = item.costo_estimado > 0 ? (varianza / item.costo_estimado) * 100 : null
+
+  const comprobanteLabel: Record<string, string> = {
+    boleta: 'Boleta', rxh: 'RxH', sin_comprobante: 'Sin comp.',
+  }
 
   return (
     <tr className={cn(
@@ -805,35 +817,57 @@ function ItemRow({
         )}
       </td>
 
-      {/* Margen */}
+      {/* Margen — % cuando hay P.Venta, dinero cuando no */}
       <td className="px-3 py-2.5 text-right">
-        <span className={cn(
-          'text-sm tabular-nums font-medium',
-          item.precio_venta === 0 && item.gasto_real === 0 ? 'text-zinc-300'
-          : margen < 0 ? 'text-red-600' : 'text-emerald-700'
-        )}>
-          {item.precio_venta > 0 || item.gasto_real > 0 ? formatMoney(margen) : '—'}
-        </span>
+        {item.gasto_real === 0 && item.precio_venta === 0 ? (
+          <span className="text-sm text-zinc-300">—</span>
+        ) : margenRowPct !== null ? (
+          <span className={cn('text-sm tabular-nums font-medium', margenRowPct < 0 ? 'text-red-600' : 'text-emerald-700')}>
+            {margenRowPct.toFixed(0)}%
+          </span>
+        ) : (
+          /* sin precio_venta: mostrar pérdida en dinero */
+          <span className={cn('text-sm tabular-nums font-medium', margenAmt < 0 ? 'text-red-600' : 'text-emerald-700')}>
+            {formatMoney(margenAmt)}
+          </span>
+        )}
       </td>
 
-      {/* IGV */}
+      {/* IGV — muestra tipo comprobante cuando no es factura */}
       <td className="px-3 py-2.5 text-right">
-        <span className={cn('text-sm tabular-nums', igv === 0 ? 'text-zinc-300' : 'text-blue-700')}>
-          {igv > 0 ? formatMoney(igv) : '—'}
-        </span>
+        {item.tipo_comprobante === 'factura' ? (
+          <span className="text-sm tabular-nums text-blue-700">{formatMoney(igv)}</span>
+        ) : item.tipo_comprobante && item.gasto_real > 0 ? (
+          <span className="text-sm text-zinc-400">
+            S/ 0
+            <span className="ml-1 text-[10px] text-zinc-400">({comprobanteLabel[item.tipo_comprobante] ?? item.tipo_comprobante})</span>
+          </span>
+        ) : (
+          <span className="text-sm text-zinc-300">—</span>
+        )}
       </td>
 
-      {/* Delete */}
+      {/* Acciones: lápiz (editar concepto) + trash (eliminar, solo admin) */}
       {canEdit && (
         <td className="px-2 py-2.5">
-          {canDelete && (
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
-              onClick={() => onDelete(item.id)}
-              className="opacity-0 group-hover:opacity-100 p-1 text-zinc-300 hover:text-red-500 transition-all rounded"
+              onClick={() => onStartEdit(item.id, 'concepto')}
+              className="p-1 text-zinc-400 hover:text-zinc-700 rounded"
+              title="Editar"
             >
-              <Trash2 size={13} />
+              <Pencil size={12} />
             </button>
-          )}
+            {canDelete && (
+              <button
+                onClick={() => onDelete(item.id)}
+                className="p-1 text-zinc-300 hover:text-red-500 rounded"
+                title="Eliminar"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </div>
         </td>
       )}
     </tr>
