@@ -31,7 +31,7 @@ export default async function ProyectoDetallePage({ params }: Props) {
 
   if (error || !proyectoRaw) notFound()
 
-  const [itemsRes, proveedoresRes, gastosRes, asignacionesRes] = await Promise.all([
+  const [itemsRes, proveedoresRes, gastosRes, asignacionesRes, clientesRes, facturasRes] = await Promise.all([
     // Items tabla unificada
     (supabase.from('proyecto_items' as never) as ReturnType<typeof supabase.from>)
       .select(`
@@ -63,6 +63,18 @@ export default async function ProyectoDetallePage({ params }: Props) {
       .from('asignaciones_gg')
       .select('monto')
       .eq('proyecto_id', params.id),
+
+    // Clientes de la org para el combobox del sidebar
+    supabase
+      .from('clientes')
+      .select('id, nombre, ruc, contacto_nombre, contacto_email')
+      .order('nombre', { ascending: true }),
+
+    // Facturas emitidas del proyecto
+    (supabase.from('facturas_proyecto' as never) as ReturnType<typeof supabase.from>)
+      .select('*')
+      .eq('proyecto_id', params.id)
+      .order('created_at', { ascending: true }),
   ])
 
   const initialItems   = (itemsRes.data   ?? []) as ProyectoItem[]
@@ -70,6 +82,8 @@ export default async function ProyectoDetallePage({ params }: Props) {
   const gastos         = (gastosRes.data  ?? []) as GastoFecha[]
   const indirecto      = ((asignacionesRes.data ?? []) as { monto: number }[])
                            .reduce((s, a) => s + a.monto, 0)
+  const clientes       = (clientesRes.data ?? []) as ClienteData[]
+  const initialFacturas = (facturasRes.data ?? []) as FacturaProyecto[]
 
   return (
     <ProyectoDetailClient
@@ -79,6 +93,8 @@ export default async function ProyectoDetallePage({ params }: Props) {
       gastos={gastos}
       indirecto={indirecto}
       rol={rol ?? 'viewer'}
+      clientes={clientes}
+      initialFacturas={initialFacturas}
     />
   )
 }
@@ -96,6 +112,8 @@ export interface ProyectoData {
   notas: string | null
   created_at: string
   org_id: string
+  cliente_id: string | null
+  responsable_id: string | null
   subtotal_proyecto: number
   aplica_igv_venta: boolean
   aplica_detraccion_venta: boolean
@@ -149,4 +167,40 @@ export interface GastoFecha {
   fecha_comprobante: string
   tipo_comprobante: string
   estado_pago: string
+}
+
+export interface ClienteData {
+  id: string
+  nombre: string
+  ruc: string | null
+  contacto_nombre: string | null
+  contacto_email: string | null
+}
+
+export interface FacturaProyecto {
+  id: string
+  proyecto_id: string
+  org_id: string
+  numero_factura: string
+  subtotal: number
+  aplica_igv: boolean
+  igv: number
+  aplica_detraccion: boolean
+  pct_detraccion: number
+  monto_detraccion: number
+  total: number
+  cliente_abona: number
+  estado: 'borrador' | 'emitida' | 'cobrada' | 'vencida'
+  fecha_emision: string | null
+  fecha_vencimiento: string | null
+  fecha_cobro: string | null
+  notas: string | null
+  created_at: string
+}
+
+export interface TeamMember {
+  user_id: string
+  email: string
+  nombre: string
+  rol: string
 }

@@ -24,7 +24,7 @@ import {
   ChartPresupuestoVsReal, ChartComposicion, ChartCascada, ChartBurnRate,
 } from './proyecto-charts'
 import { cn, formatMoney, centavosToSoles, solesToCentavos } from '@/lib/utils'
-import type { ProyectoData, ProyectoItem, Proveedor, GastoFecha } from './page'
+import type { ProyectoData, ProyectoItem, Proveedor, GastoFecha, ClienteData, FacturaProyecto } from './page'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -121,13 +121,15 @@ interface Props {
   gastos: GastoFecha[]
   indirecto: number
   rol: string
+  clientes: ClienteData[]
+  initialFacturas: FacturaProyecto[]
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function ProyectoDetailClient({
   proyecto: initialProyecto, initialItems, proveedores: initialProveedores,
-  gastos, indirecto, rol,
+  gastos, indirecto, rol, clientes, initialFacturas,
 }: Props) {
   const router = useRouter()
   const [proyecto, setProyecto]       = useState<ProyectoData>(initialProyecto)
@@ -463,16 +465,15 @@ export function ProyectoDetailClient({
                   <SheetTrigger asChild>
                     <Button variant="outline" size="sm" className="xl:hidden"><PanelRight size={14} /></Button>
                   </SheetTrigger>
-                  <SheetContent side="right" className="w-80 overflow-y-auto p-0">
-                    <SheetHeader><SheetTitle>Detalles del proyecto</SheetTitle></SheetHeader>
-                    <ProyectoSidebar proyecto={proyecto} canEdit={canEdit} items={items} onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))} />
+                  <SheetContent side="right" className="w-96 overflow-y-auto p-0">
+                    <SheetHeader className="px-5 py-4 border-b border-zinc-100"><SheetTitle>Detalles del proyecto</SheetTitle></SheetHeader>
+                    <ProyectoSidebar
+                      proyecto={proyecto} canEdit={canEdit} items={items}
+                      clientes={clientes} initialFacturas={initialFacturas}
+                      onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))}
+                    />
                   </SheetContent>
                 </Sheet>
-                {canEdit && (
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={`/proyectos/${proyecto.id}/editar`}><Pencil size={13} className="mr-1.5" />Editar</Link>
-                  </Button>
-                )}
                 {canEdit && proyecto.estado !== 'cerrado' && (
                   <Button size="sm" onClick={() => setShowFinalizarDialog(true)}>Finalizar Registro</Button>
                 )}
@@ -699,8 +700,12 @@ export function ProyectoDetailClient({
         </div>
 
         {/* ── Right sidebar ────────────────────────────────────────────────── */}
-        <aside className="hidden xl:flex w-72 shrink-0 flex-col sticky top-0 self-start max-h-screen overflow-y-auto" style={{ borderLeft: '3px solid #e2e8f0', backgroundColor: '#f8fafc' }}>
-          <ProyectoSidebar proyecto={proyecto} canEdit={canEdit} items={items} onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))} />
+        <aside className="hidden xl:block w-80 shrink-0 sticky top-6 self-start" style={{ maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', borderLeft: '2px solid #e2e8f0', backgroundColor: '#f8fafc' }}>
+          <ProyectoSidebar
+            proyecto={proyecto} canEdit={canEdit} items={items}
+            clientes={clientes} initialFacturas={initialFacturas}
+            onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))}
+          />
         </aside>
       </div>
     </>
