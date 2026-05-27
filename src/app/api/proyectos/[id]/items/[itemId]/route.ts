@@ -6,15 +6,30 @@ import { z } from 'zod'
 type Params = { params: { id: string; itemId: string } }
 
 const patchSchema = z.object({
-  concepto: z.string().max(300).optional(),
-  unidad: z.enum(['unid', 'hora', 'global', 'm2', 'kg', 'dia', 'otro']).optional(),
-  proveedor_id: z.string().uuid().optional().nullable(),
-  costo_estimado: z.number().int().min(0).optional(),
-  precio_venta: z.number().int().min(0).optional(),
-  gasto_real: z.number().int().min(0).optional(),
-  tipo_comprobante: z.enum(['factura', 'boleta', 'rxh', 'sin_comprobante']).optional().nullable(),
-  sort_order: z.number().int().optional(),
+  concepto:            z.string().max(300).optional(),
+  unidad:              z.enum(['unid', 'hora', 'global', 'm2', 'kg', 'dia', 'otro']).optional(),
+  proveedor_id:        z.string().uuid().optional().nullable(),
+  costo_estimado:      z.number().int().min(0).optional(),
+  precio_venta:        z.number().int().min(0).optional(),
+  gasto_real:          z.number().int().min(0).optional(),
+  cantidad:            z.number().min(0).optional(),
+  precio_unitario:     z.number().int().min(0).optional(),
+  tipo_comprobante:    z.enum(['factura', 'boleta', 'rxh', 'sin_comprobante', 'pendiente']).optional().nullable(),
+  estado_pago:         z.enum(['pendiente', 'pagado', 'parcial']).optional(),
+  fecha_pago:          z.string().nullable().optional(),
+  foto_url:            z.string().nullable().optional(),
+  factura_url:         z.string().nullable().optional(),
+  constancia_pago_url: z.string().nullable().optional(),
+  sort_order:          z.number().int().optional(),
 })
+
+const SELECT_FIELDS = `
+  id, concepto, unidad, proveedor_id, costo_estimado, precio_venta,
+  gasto_real, cantidad, precio_unitario, tipo_comprobante,
+  estado_pago, fecha_pago, foto_url, factura_url, constancia_pago_url,
+  sort_order, created_at,
+  proveedor:proveedores(id, razon_social, nombre_comercial)
+`
 
 export async function PUT(req: Request, { params }: Params) {
   const auth = await requireAuth('pm')
@@ -32,11 +47,7 @@ export async function PUT(req: Request, { params }: Params) {
     .update(parsed.data)
     .eq('id', params.itemId)
     .eq('org_id', auth.orgId)
-    .select(`
-      id, concepto, unidad, proveedor_id, costo_estimado, precio_venta,
-      gasto_real, tipo_comprobante, sort_order,
-      proveedor:proveedores(id, razon_social, nombre_comercial)
-    `)
+    .select(SELECT_FIELDS)
     .single()
 
   if (error) return apiError('Error actualizando item', 500, error)

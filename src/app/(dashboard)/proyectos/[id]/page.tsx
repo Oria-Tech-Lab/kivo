@@ -36,7 +36,9 @@ export default async function ProyectoDetallePage({ params }: Props) {
     (supabase.from('proyecto_items' as never) as ReturnType<typeof supabase.from>)
       .select(`
         id, concepto, unidad, proveedor_id, costo_estimado, precio_venta,
-        gasto_real, tipo_comprobante, sort_order, created_at,
+        gasto_real, cantidad, precio_unitario, tipo_comprobante,
+        estado_pago, fecha_pago, foto_url, factura_url, constancia_pago_url,
+        sort_order, created_at,
         proveedor:proveedores(id, razon_social, nombre_comercial)
       `)
       .eq('proyecto_id', params.id)
@@ -94,6 +96,10 @@ export interface ProyectoData {
   notas: string | null
   created_at: string
   org_id: string
+  subtotal_proyecto: number
+  aplica_igv_venta: boolean
+  aplica_detraccion_venta: boolean
+  pct_detraccion_venta: number
   cliente: {
     id: string
     nombre: string
@@ -116,7 +122,14 @@ export interface ProyectoItem {
   costo_estimado: number
   precio_venta: number
   gasto_real: number
-  tipo_comprobante: 'factura' | 'boleta' | 'rxh' | 'sin_comprobante' | null
+  cantidad: number
+  precio_unitario: number
+  tipo_comprobante: 'factura' | 'boleta' | 'rxh' | 'sin_comprobante' | 'pendiente' | null
+  estado_pago: 'pendiente' | 'pagado' | 'parcial'
+  fecha_pago: string | null
+  foto_url: string | null
+  factura_url: string | null
+  constancia_pago_url: string | null
   sort_order: number
   created_at: string
   proveedor: { id: string; razon_social: string; nombre_comercial: string | null } | null
