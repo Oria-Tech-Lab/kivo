@@ -7,8 +7,15 @@ import { z } from 'zod'
 type Params = { params: { id: string } }
 
 const patchSchema = z.object({
-  estado: z.enum(['activo', 'en_pausa', 'cerrado']).optional(),
-  notas:  z.string().max(5000).optional().nullable(),
+  estado:                  z.enum(['activo', 'en_pausa', 'cerrado']).optional(),
+  notas:                   z.string().max(5000).optional().nullable(),
+  tipo:                    z.enum(['digital', 'offline', 'evento', 'instalacion', 'otro']).optional(),
+  fecha_inicio:            z.string().optional(),
+  fecha_cierre_est:        z.string().optional().nullable(),
+  subtotal_proyecto:       z.number().int().min(0).optional(),
+  aplica_igv_venta:        z.boolean().optional(),
+  aplica_detraccion_venta: z.boolean().optional(),
+  pct_detraccion_venta:    z.number().int().min(0).max(100).optional(),
 })
 
 /**
@@ -26,12 +33,12 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!parsed.success) return apiError(parsed.error.issues[0]?.message ?? 'Datos inválidos', 400)
 
   const supabase = createClient()
-  const { data: proyecto, error } = await supabase
-    .from('proyectos')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: proyecto, error } = await (supabase.from('proyectos') as any)
     .update(parsed.data)
     .eq('id', params.id)
     .eq('org_id', auth.orgId)
-    .select('id, estado, notas')
+    .select('id, estado, notas, subtotal_proyecto, aplica_igv_venta, aplica_detraccion_venta, pct_detraccion_venta')
     .single()
 
   if (error || !proyecto) return apiError('Error actualizando proyecto', 500, error ?? undefined)

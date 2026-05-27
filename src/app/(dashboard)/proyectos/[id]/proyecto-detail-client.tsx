@@ -126,10 +126,11 @@ interface Props {
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function ProyectoDetailClient({
-  proyecto, initialItems, proveedores: initialProveedores,
+  proyecto: initialProyecto, initialItems, proveedores: initialProveedores,
   gastos, indirecto, rol,
 }: Props) {
   const router = useRouter()
+  const [proyecto, setProyecto]       = useState<ProyectoData>(initialProyecto)
   const [items, setItems]             = useState<ProyectoItem[]>(initialItems)
   const [proveedores, setProveedores] = useState<Proveedor[]>(initialProveedores)
   const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null)
@@ -464,7 +465,7 @@ export function ProyectoDetailClient({
                   </SheetTrigger>
                   <SheetContent side="right" className="w-80 overflow-y-auto p-0">
                     <SheetHeader><SheetTitle>Detalles del proyecto</SheetTitle></SheetHeader>
-                    <ProyectoSidebar proyecto={proyecto} canEdit={canEdit} />
+                    <ProyectoSidebar proyecto={proyecto} canEdit={canEdit} items={items} onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))} />
                   </SheetContent>
                 </Sheet>
                 {canEdit && (
@@ -698,8 +699,8 @@ export function ProyectoDetailClient({
         </div>
 
         {/* ── Right sidebar ────────────────────────────────────────────────── */}
-        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-zinc-200 bg-white sticky top-0 self-start max-h-screen overflow-y-auto">
-          <ProyectoSidebar proyecto={proyecto} canEdit={canEdit} />
+        <aside className="hidden xl:flex w-72 shrink-0 flex-col sticky top-0 self-start max-h-screen overflow-y-auto" style={{ borderLeft: '3px solid #e2e8f0', backgroundColor: '#f8fafc' }}>
+          <ProyectoSidebar proyecto={proyecto} canEdit={canEdit} items={items} onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))} />
         </aside>
       </div>
     </>
