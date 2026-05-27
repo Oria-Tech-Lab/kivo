@@ -35,7 +35,7 @@ interface SidebarProps {
   userRole: string
 }
 
-export function Sidebar({ orgName: _orgName, userEmail, userRole: _userRole }: SidebarProps) {
+export function Sidebar({ userEmail }: SidebarProps) {
   const pathname = usePathname()
   const router   = useRouter()
 
