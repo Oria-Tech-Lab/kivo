@@ -2,8 +2,41 @@ import { NextResponse } from 'next/server'
 import { requireAuth, parseJsonBody, apiError } from '@/lib/api-helpers'
 import { createClient } from '@/lib/supabase/server'
 import { proyectoSchema } from '@/lib/validations/proyecto'
+import { z } from 'zod'
 
 type Params = { params: { id: string } }
+
+const patchSchema = z.object({
+  estado: z.enum(['activo', 'en_pausa', 'cerrado']).optional(),
+  notas:  z.string().max(5000).optional().nullable(),
+})
+
+/**
+ * PATCH /api/proyectos/[id]
+ * Actualización parcial: estado y/o notas. Requiere rol pm o admin.
+ */
+export async function PATCH(request: Request, { params }: Params) {
+  const auth = await requireAuth('pm')
+  if (auth instanceof NextResponse) return auth
+
+  const body = await parseJsonBody<unknown>(request)
+  if (body instanceof NextResponse) return body
+
+  const parsed = patchSchema.safeParse(body)
+  if (!parsed.success) return apiError(parsed.error.issues[0]?.message ?? 'Datos inválidos', 400)
+
+  const supabase = createClient()
+  const { data: proyecto, error } = await supabase
+    .from('proyectos')
+    .update(parsed.data)
+    .eq('id', params.id)
+    .eq('org_id', auth.orgId)
+    .select('id, estado, notas')
+    .single()
+
+  if (error || !proyecto) return apiError('Error actualizando proyecto', 500, error ?? undefined)
+  return NextResponse.json(proyecto)
+}
 
 /**
  * GET /api/proyectos/[id]
