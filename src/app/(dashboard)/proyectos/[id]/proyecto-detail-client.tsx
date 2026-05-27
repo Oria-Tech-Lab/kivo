@@ -85,6 +85,7 @@ export function ProyectoDetailClient({
   const [editingCell, setEditingCell]     = useState<{ id: string; field: string } | null>(null)
   const [saving, setSaving]               = useState<string | null>(null)
   const [adding, setAdding]               = useState(false)
+  const [apiError, setApiError]           = useState<string | null>(null)
   const [filterProv, setFilterProv]       = useState<string | null>(null)
   const [showFinalizarDialog, setShowFinalizarDialog] = useState(false)
   const [finalizando, setFinalizando]     = useState(false)
@@ -157,6 +158,11 @@ export function ProyectoDetailClient({
 
   // ── Inline editing ──────────────────────────────────────────────────────────
 
+  function showError(msg: string) {
+    setApiError(msg)
+    setTimeout(() => setApiError(null), 5000)
+  }
+
   async function saveCell(itemId: string, field: string, raw: unknown) {
     setSaving(itemId)
     try {
@@ -175,14 +181,19 @@ export function ProyectoDetailClient({
       if (res.ok) {
         const updated = await res.json() as ProyectoItem
         setItems(prev => prev.map(i => i.id === itemId ? updated : i))
+      } else {
+        const body = await res.json().catch(() => ({})) as { error?: string }
+        showError(body.error ?? `Error ${res.status} al guardar el campo`)
       }
+    } catch {
+      showError('Error de red al guardar el ítem')
     } finally {
       setSaving(null)
       setEditingCell(null)
     }
   }
 
-  async function addItem() {
+  async function addItem(focusField: 'concepto' | 'gasto_real' = 'concepto') {
     if (!canEdit || adding) return
     setAdding(true)
     try {
@@ -194,8 +205,13 @@ export function ProyectoDetailClient({
       if (res.ok) {
         const newItem = await res.json() as ProyectoItem
         setItems(prev => [...prev, newItem])
-        setTimeout(() => setEditingCell({ id: newItem.id, field: 'concepto' }), 50)
+        setTimeout(() => setEditingCell({ id: newItem.id, field: focusField }), 50)
+      } else {
+        const body = await res.json().catch(() => ({})) as { error?: string }
+        showError(body.error ?? `Error ${res.status} al crear el ítem. ¿Ejecutaste la migración 003 en Supabase?`)
       }
+    } catch {
+      showError('Error de red. Verifica tu conexión.')
     } finally {
       setAdding(false)
     }
@@ -204,7 +220,11 @@ export function ProyectoDetailClient({
   async function deleteItem(itemId: string) {
     if (!canDelete || !confirm('¿Eliminar esta fila?')) return
     const res = await fetch(`/api/proyectos/${proyecto.id}/items/${itemId}`, { method: 'DELETE' })
-    if (res.ok) setItems(prev => prev.filter(i => i.id !== itemId))
+    if (res.ok) {
+      setItems(prev => prev.filter(i => i.id !== itemId))
+    } else {
+      showError('Error al eliminar el ítem')
+    }
   }
 
   function onProveedorCreated(p: Proveedor) {
@@ -298,6 +318,17 @@ export function ProyectoDetailClient({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Error banner */}
+      {apiError && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 shadow-lg text-sm text-red-700 max-w-lg">
+          <X size={15} className="shrink-0 text-red-500" />
+          <span>{apiError}</span>
+          <button onClick={() => setApiError(null)} className="ml-auto text-red-400 hover:text-red-600">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       <div className="flex min-h-full">
         {/* ── Left / main ──────────────────────────────────────────────────── */}
@@ -456,7 +487,7 @@ export function ProyectoDetailClient({
                   {canEdit && (
                     <tr
                       className="border-b border-zinc-100 cursor-text hover:bg-zinc-50/50"
-                      onClick={addItem}
+                      onClick={() => addItem('concepto')}
                     >
                       <td colSpan={12} className="px-4 py-3">
                         <span className="text-sm text-zinc-300 italic select-none">
@@ -532,7 +563,7 @@ export function ProyectoDetailClient({
             {/* Add buttons */}
             {canEdit && (
               <div className="flex gap-3 px-5 py-4 border-t border-zinc-100">
-                <Button size="sm" onClick={addItem} disabled={adding}>
+                <Button size="sm" onClick={() => addItem('concepto')} disabled={adding}>
                   <Plus size={13} className="mr-1.5" />
                   Agregar ítem presupuestado
                 </Button>
@@ -540,23 +571,8 @@ export function ProyectoDetailClient({
                   size="sm"
                   variant="outline"
                   className="border-amber-300 text-amber-700 hover:bg-amber-50"
-                  onClick={async () => {
-                    setAdding(true)
-                    try {
-                      const res = await fetch(`/api/proyectos/${proyecto.id}/items`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ concepto: '', unidad: 'global', costo_estimado: 0, precio_venta: 0, gasto_real: 0, sort_order: items.length }),
-                      })
-                      if (res.ok) {
-                        const newItem = await res.json() as ProyectoItem
-                        setItems(prev => [...prev, newItem])
-                        setTimeout(() => setEditingCell({ id: newItem.id, field: 'gasto_real' }), 50)
-                      }
-                    } finally {
-                      setAdding(false)
-                    }
-                  }}
+                  onClick={() => addItem('gasto_real')}
+                  disabled={adding}
                 >
                   ✦ Agregar gasto extra
                 </Button>
