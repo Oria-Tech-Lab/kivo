@@ -173,7 +173,10 @@ export function ProyectoDetailClient({
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
-  const filteredItems = filterProv ? items.filter(i => i.proveedor_id === filterProv) : items
+  const filteredItems = useMemo(
+    () => filterProv ? items.filter(i => i.proveedor_id === filterProv) : items,
+    [items, filterProv],
+  )
 
   const sortedItems = useMemo(() => {
     if (!sortState) return filteredItems
@@ -249,6 +252,10 @@ export function ProyectoDetailClient({
   // ── Save helpers ─────────────────────────────────────────────────────────────
 
   async function saveFields(itemId: string, fields: Record<string, unknown>) {
+    // Optimistic update — UI reflects change immediately
+    const snapshot = items
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, ...fields } as ProyectoItem : i))
+
     setSaving(itemId)
     try {
       const res = await fetch(`/api/proyectos/${proyecto.id}/items/${itemId}`, {
@@ -261,10 +268,12 @@ export function ProyectoDetailClient({
         setItems(prev => prev.map(i => i.id === itemId ? updated : i))
         if (editingSheet?.id === itemId) setEditingSheet(updated)
       } else {
+        setItems(snapshot) // revert on API error
         const body = await res.json().catch(() => ({})) as { error?: string }
         showError(body.error ?? `Error ${res.status}`)
       }
     } catch {
+      setItems(snapshot) // revert on network error
       showError('Error de red al guardar')
     } finally {
       setSaving(null)
@@ -332,9 +341,13 @@ export function ProyectoDetailClient({
 
   async function deleteItem(itemId: string) {
     if (!canDelete || !confirm('¿Eliminar esta fila?')) return
+    const snapshot = items
+    setItems(prev => prev.filter(i => i.id !== itemId)) // optimistic
     const res = await fetch(`/api/proyectos/${proyecto.id}/items/${itemId}`, { method: 'DELETE' })
-    if (res.ok) setItems(prev => prev.filter(i => i.id !== itemId))
-    else showError('Error al eliminar el ítem')
+    if (!res.ok) {
+      setItems(snapshot) // revert
+      showError('Error al eliminar el ítem')
+    }
   }
 
   function onProveedorCreated(p: Proveedor) {
