@@ -35,12 +35,6 @@ const ESTADO_OPTIONS = [
   { value: 'en_pausa', label: 'En pausa', cls: 'text-amber-700',   dot: 'bg-amber-400'   },
   { value: 'cerrado',  label: 'Cerrado',  cls: 'text-zinc-500',    dot: 'bg-zinc-400'     },
 ]
-const DETRACCION_OPTIONS = [
-  { value: '0',  label: 'No aplica' },
-  { value: '4',  label: '4%'        },
-  { value: '10', label: '10%'       },
-  { value: '12', label: '12%'       },
-]
 const PCT_DETRACCION_VENTA = [
   { value: '4',  label: '4%'  },
   { value: '10', label: '10%' },
@@ -676,12 +670,13 @@ interface Props {
   clientes: ClienteData[]
   initialFacturas: FacturaProyecto[]
   onProyectoUpdate: (fields: Partial<ProyectoData>) => void
+  onConcluir?: () => void
 }
 
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
 export function ProyectoSidebar({
-  proyecto, canEdit, items, clientes: initialClientes, initialFacturas, onProyectoUpdate,
+  proyecto, canEdit, items, clientes: initialClientes, initialFacturas, onProyectoUpdate, onConcluir,
 }: Props) {
   const [clientes, setClientes]       = useState<ClienteData[]>(initialClientes)
   const [facturas, setFacturas]       = useState<FacturaProyecto[]>(initialFacturas)
@@ -819,6 +814,14 @@ export function ProyectoSidebar({
                 {estadoCfg.label}
               </div>
             )}
+            {proyecto.estado !== 'cerrado' && onConcluir && (
+              <button
+                onClick={onConcluir}
+                className="mt-3 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 transition-colors flex items-center justify-center gap-2"
+              >
+                <Check size={13} /> Marcar como concluido
+              </button>
+            )}
           </>
         ) : (
           estadoCfg && (
@@ -918,27 +921,6 @@ export function ProyectoSidebar({
             <InlineDateField label="Cierre est." value={proyecto.fecha_cierre_est}
               disabled={!canEdit} warnIfPast={!!cierreVencido} accentRed={!!cierreVencido}
               onSave={v => saveInfo({ fecha_cierre_est: v })} />
-
-            {/* Detracción costos */}
-            <div className="flex items-center justify-between gap-2">
-              <dt className="text-xs text-zinc-400 shrink-0">Detr. costos</dt>
-              <dd>
-                {canEdit ? (
-                  <select value={proyecto.aplica_detraccion ? '10' : '0'}
-                    onChange={e => saveInfo({ aplica_detraccion: e.target.value !== '0' })}
-                    className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-400"
-                  >
-                    {DETRACCION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                ) : (
-                  proyecto.aplica_detraccion ? (
-                    <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">Sí 10%</span>
-                  ) : (
-                    <span className="text-xs text-zinc-400">No aplica</span>
-                  )
-                )}
-              </dd>
-            </div>
 
             {/* Categoría (read-only) */}
             {proyecto.categoria && (

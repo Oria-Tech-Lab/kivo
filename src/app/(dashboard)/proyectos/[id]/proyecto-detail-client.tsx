@@ -380,37 +380,83 @@ export function ProyectoDetailClient({
 
   // ── KPI cards ────────────────────────────────────────────────────────────────
 
+  const igvCredito = totals.igv  // IGV crédito fiscal (de facturas de gasto)
+  const igvDebito  = initialFacturas.reduce((s, f) => s + f.igv, 0)  // IGV débito (facturas emitidas al cliente)
+  const igvNeto    = igvDebito - igvCredito  // positivo = a pagar SUNAT, negativo = saldo a favor
+
   const kpiCards = (
     <div className="grid gap-4 grid-cols-2 xl:grid-cols-4">
+      {/* Presupuestado */}
       <KpiCard
         label="Presupuestado" icon={<FileText size={15} className="text-zinc-400" />}
         value={totals.costo_estimado > 0 ? formatMoney(totals.costo_estimado) : '—'}
-        sub="Base planificada"
+        sub={avancePct !== null ? `${avancePct.toFixed(0)}% ejecutado` : 'Sin ítems aún'}
         progress={avancePct !== null ? Math.min(avancePct, 100) : undefined}
-        progressColor="bg-blue-500"
+        progressColor={avancePct && avancePct > 100 ? 'bg-red-500' : 'bg-blue-500'}
+        detail={totals.gasto_real > 0 && totals.costo_estimado > 0 ? (
+          <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
+            Real: <span className="font-medium text-zinc-600 font-mono">{formatMoney(totals.gasto_real)}</span>
+            {' '}de{' '}
+            <span className="font-mono">{formatMoney(totals.costo_estimado)}</span>
+          </p>
+        ) : undefined}
       />
+
+      {/* Gastado Real */}
       <KpiCard
         label="Gastado (Real)" icon={<Wallet size={15} className="text-zinc-400" />}
         value={totals.gasto_real > 0 ? formatMoney(totals.gasto_real) : '—'}
         sub={avancePct !== null ? `${avancePct.toFixed(0)}% del presupuesto` : 'Sin gastos aún'}
         progress={avancePct !== null ? Math.min(avancePct, 100) : undefined}
         progressColor={avancePct && avancePct > 100 ? 'bg-red-500' : 'bg-blue-500'}
+        detail={totals.costo_estimado > 0 ? (
+          <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
+            De <span className="font-mono">{formatMoney(totals.costo_estimado)}</span> presupuestados
+          </p>
+        ) : undefined}
       />
+
+      {/* Margen Bruto */}
       <KpiCard
         label="Margen Bruto"
         icon={<TrendingUp size={15} className={margenSobreCosto === null ? 'text-zinc-400' : margenSobreCosto < 15 ? 'text-red-500' : margenSobreCosto < 30 ? 'text-amber-500' : 'text-emerald-500'} />}
         value={totals.precio_venta > 0 || totals.gasto_real > 0 ? formatMoney(totals.margen) : '—'}
-        sub={margenSobreCosto !== null ? `${margenSobreCosto.toFixed(1)}% sobre costo real` : 'Sin datos suficientes'}
+        sub={margenSobreCosto !== null ? `${margenSobreCosto.toFixed(1)}% sobre costo` : 'Sin datos suficientes'}
         progress={margenSobreCosto !== null ? Math.max(0, Math.min(margenSobreCosto, 100)) : undefined}
         progressColor={margenSobreCosto === null ? 'bg-zinc-300' : margenSobreCosto < 0 ? 'bg-red-500' : margenSobreCosto < 15 ? 'bg-red-400' : margenSobreCosto < 30 ? 'bg-amber-400' : 'bg-emerald-500'}
         cardBg={margenSobreCosto === null ? '' : margenSobreCosto < 15 ? 'bg-red-50 border-red-200' : margenSobreCosto < 30 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}
+        detail={totals.gasto_real > 0 ? (
+          <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
+            De <span className="font-mono">{formatMoney(totals.gasto_real)}</span> en costos
+          </p>
+        ) : undefined}
       />
+
+      {/* Posición IGV */}
       <KpiCard
         label="Posición IGV" icon={<BarChart3 size={15} className="text-zinc-400" />}
-        value={totals.igv > 0 ? formatMoney(totals.igv) : '—'}
-        sub={totals.igv > 0 ? 'Crédito fiscal acumulado' : 'Sin facturas registradas'}
-        progress={totals.igv > 0 && totals.gasto_real > 0 ? Math.min((totals.igv / totals.gasto_real) * 100, 100) : undefined}
+        value={igvCredito > 0 ? formatMoney(igvCredito) : '—'}
+        sub={igvCredito > 0 ? 'IGV crédito fiscal (gastos)' : 'Sin facturas de gasto'}
+        progress={igvCredito > 0 && igvDebito > 0 ? Math.min((igvCredito / igvDebito) * 100, 100) : igvCredito > 0 ? 100 : undefined}
         progressColor="bg-amber-400"
+        detail={(igvCredito > 0 || igvDebito > 0) ? (
+          <div className="mt-1 space-y-0.5 text-[11px] tabular-nums">
+            {igvDebito > 0 && (
+              <p className="text-zinc-400">
+                Débito (ventas): <span className="font-mono font-medium text-zinc-600">{formatMoney(igvDebito)}</span>
+              </p>
+            )}
+            {(igvCredito > 0 || igvDebito > 0) && (
+              <p className={cn('font-semibold', igvNeto > 0 ? 'text-red-600' : igvNeto < 0 ? 'text-emerald-600' : 'text-zinc-400')}>
+                {igvNeto > 0
+                  ? `A pagar SUNAT: ${formatMoney(igvNeto)}`
+                  : igvNeto < 0
+                  ? `Saldo a favor: ${formatMoney(Math.abs(igvNeto))}`
+                  : 'Posición neutra'}
+              </p>
+            )}
+          </div>
+        ) : undefined}
       />
     </div>
   )
@@ -422,7 +468,7 @@ export function ProyectoDetailClient({
       <Dialog open={showFinalizarDialog} onOpenChange={setShowFinalizarDialog}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Finalizar registro del proyecto</DialogTitle>
+            <DialogTitle>Marcar proyecto como concluido</DialogTitle>
             <DialogDescription className="text-zinc-500 text-sm mt-1">
               Se marcará el proyecto como <strong>Cerrado</strong>. Podrás seguir consultando
               el historial pero no se podrán agregar nuevos ítems ni gastos.
@@ -484,12 +530,10 @@ export function ProyectoDetailClient({
                       proyecto={proyecto} canEdit={canEdit} items={items}
                       clientes={clientes} initialFacturas={initialFacturas}
                       onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))}
+                      onConcluir={canEdit ? () => setShowFinalizarDialog(true) : undefined}
                     />
                   </SheetContent>
                 </Sheet>
-                {canEdit && proyecto.estado !== 'cerrado' && (
-                  <Button size="sm" onClick={() => setShowFinalizarDialog(true)}>Finalizar Registro</Button>
-                )}
               </div>
             </div>
           </div>
@@ -718,6 +762,7 @@ export function ProyectoDetailClient({
             proyecto={proyecto} canEdit={canEdit} items={items}
             clientes={clientes} initialFacturas={initialFacturas}
             onProyectoUpdate={p => setProyecto(prev => ({ ...prev, ...p }))}
+            onConcluir={canEdit ? () => setShowFinalizarDialog(true) : undefined}
           />
         </aside>
       </div>
@@ -750,9 +795,10 @@ function SortHeader({ col, label, sort, onSort, className }: {
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 
-function KpiCard({ label, icon, value, sub, progress, progressColor, cardBg }: {
+function KpiCard({ label, icon, value, sub, progress, progressColor, cardBg, detail }: {
   label: string; icon?: React.ReactNode; value: string; sub?: string
   progress?: number; progressColor?: string; cardBg?: string
+  detail?: React.ReactNode
 }) {
   return (
     <div className={cn('rounded-lg border border-zinc-200 bg-white p-4 shadow-sm', cardBg)}>
@@ -762,11 +808,12 @@ function KpiCard({ label, icon, value, sub, progress, progressColor, cardBg }: {
       </div>
       <p className="mt-2 text-xl font-bold tabular-nums font-mono text-zinc-900 leading-none">{value}</p>
       {progress !== undefined && (
-        <div className="mt-3 h-2 w-full rounded-full bg-zinc-100 overflow-hidden">
+        <div className="mt-3 h-1.5 w-full rounded-full bg-zinc-100 overflow-hidden">
           <div className={cn('h-full rounded-full transition-all', progressColor ?? 'bg-blue-500')} style={{ width: `${Math.min(progress, 100)}%` }} />
         </div>
       )}
       {sub && <p className="mt-1.5 text-xs text-zinc-400">{sub}</p>}
+      {detail}
     </div>
   )
 }
