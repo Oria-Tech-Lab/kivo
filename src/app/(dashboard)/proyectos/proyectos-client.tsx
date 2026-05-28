@@ -216,6 +216,12 @@ function PortfolioHealthCard({ proyectos }: { proyectos: ProyectoConMetricas[] }
         <p className="text-4xl font-black tabular-nums mt-1" style={{ color: '#ffffff' }}>
           {avgMargen.toFixed(1)}%
         </p>
+        <div className="w-full bg-white/20 rounded-full h-1.5 mt-2 mb-4">
+          <div
+            className="bg-white rounded-full h-1.5 transition-all duration-500"
+            style={{ width: `${Math.min(avgMargen, 100)}%` }}
+          />
+        </div>
       </div>
 
       {enRiesgo > 0 && (
