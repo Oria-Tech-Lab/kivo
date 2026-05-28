@@ -9,7 +9,7 @@ import {
 } from 'recharts'
 import {
   Plus, TrendingUp, AlertTriangle, CheckCircle2, ChevronRight,
-  ArrowUpRight, ArrowDownRight, X,
+  ArrowUpRight, ArrowDownRight, X, BarChart2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -87,6 +87,8 @@ function KpiCard({ title, value, sub, varPct, varPositiveIsBad = false, valueCol
 // ── Bar Chart ─────────────────────────────────────────────────────────────────
 
 function IngresosGastosChart({ data }: { data: ChartDataPoint[] }) {
+  const hasData = data.some(d => d.ingresos > 0 || d.gastos > 0)
+
   const fmtY = (v: number) => {
     const s = v / 100
     if (s >= 1000) return `S/ ${Math.round(s / 1000)}k`
@@ -111,34 +113,50 @@ function IngresosGastosChart({ data }: { data: ChartDataPoint[] }) {
           </span>
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={260}>
-        <BarChart data={data} barCategoryGap="35%" barGap={3}>
-          <XAxis
-            dataKey="mes"
-            axisLine={false}
-            tickLine={false}
-            tick={{ fontSize: 11, fill: '#94a3b8' }}
-          />
-          <YAxis
-            axisLine={false}
-            tickLine={false}
-            tick={{ fontSize: 11, fill: '#94a3b8' }}
-            tickFormatter={fmtY}
-            width={68}
-          />
-          <Tooltip
-            cursor={{ fill: 'rgba(241,245,249,0.8)' }}
-            formatter={(v: unknown, name: unknown) => [
-              formatMoney(v as number),
-              (name as string) === 'ingresos' ? 'Ingresos' : 'Gastos',
-            ]}
-            labelStyle={{ fontSize: 12, color: '#1e293b', fontWeight: 600 }}
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0', padding: '6px 10px' }}
-          />
-          <Bar dataKey="ingresos" fill="#1e40af" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="gastos"   fill="#93c5fd" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="relative">
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={data} barCategoryGap="35%" barGap={3}>
+            <XAxis
+              dataKey="mes"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fontSize: 11, fill: '#94a3b8' }}
+            />
+            <YAxis
+              axisLine={false}
+              tickLine={false}
+              tick={{ fontSize: 11, fill: '#94a3b8' }}
+              tickFormatter={fmtY}
+              width={68}
+            />
+            {hasData && (
+              <Tooltip
+                cursor={{ fill: 'rgba(241,245,249,0.8)' }}
+                formatter={(v: unknown, name: unknown) => [
+                  formatMoney(v as number),
+                  (name as string) === 'ingresos' ? 'Ingresos' : 'Gastos',
+                ]}
+                labelStyle={{ fontSize: 12, color: '#1e293b', fontWeight: 600 }}
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0', padding: '6px 10px' }}
+              />
+            )}
+            {hasData && <Bar dataKey="ingresos" fill="#1e40af" radius={[3, 3, 0, 0]} />}
+            {hasData && <Bar dataKey="gastos"   fill="#93c5fd" radius={[3, 3, 0, 0]} />}
+          </BarChart>
+        </ResponsiveContainer>
+        {!hasData && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none"
+            style={{ top: 8, left: 68, right: 0, bottom: 28 }}
+          >
+            <BarChart2 size={32} className="text-zinc-300" />
+            <p className="text-sm font-medium text-zinc-400">Sin movimientos registrados aún</p>
+            <p className="text-xs text-zinc-300 text-center max-w-[200px]">
+              Los datos aparecerán cuando registres ingresos y gastos
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

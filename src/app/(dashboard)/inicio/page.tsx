@@ -63,9 +63,11 @@ type McR = { tipo: string; monto: number; fecha_real: string | null }
 type McP = { tipo: string; monto: number; fecha_esperada: string | null }
 type PrRaw = {
   id: string; nombre: string; tipo: string; estado: string
+  fecha_inicio: string | null
   cliente: { id: string; nombre: string } | null
 }
 type ItRaw = { proyecto_id: string; precio_venta: number; gasto_real: number }
+type GastoChartRaw = { neto_a_pagar: number | null; fecha_comprobante: string | null }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -113,6 +115,7 @@ export default async function InicioPage() {
     itemsRes,
     clientesRes,
     proveedoresRes,
+    gastosChartRes,
   ] = await Promise.all([
     // 1. Realized movements last 6 months (chart + monthly net flow)
     mcTable
@@ -134,9 +137,9 @@ export default async function InicioPage() {
       .order('fecha_generada', { ascending: false })
       .limit(4),
 
-    // 4. All proyectos with cliente
+    // 4. All proyectos with cliente + fecha_inicio (chart fallback)
     supabase.from('proyectos')
-      .select('id, nombre, tipo, estado, cliente:clientes(id, nombre)')
+      .select('id, nombre, tipo, estado, fecha_inicio, cliente:clientes(id, nombre)')
       .order('created_at', { ascending: false }),
 
     // 5. proyecto_items for margin + pie chart
@@ -154,17 +157,27 @@ export default async function InicioPage() {
     supabase.from('proveedores')
       .select('id, razon_social, nombre_comercial')
       .order('razon_social', { ascending: true }),
+
+    // 8. Gastos chart fallback (when movimientos_caja is empty)
+    supabase.from('gastos')
+      .select('neto_a_pagar, fecha_comprobante')
+      .gte('fecha_comprobante', sixMonthsAgoStart),
   ])
 
   // ── Chart data (last 6 months) ───────────────────────────────────────────
-  const months: { key: string; mes: string; ingresos: number; gastos: number }[] = []
+  const months: {
+    key: string; mes: string
+    ingresos: number; gastos: number
+    altIngresos: number; altGastos: number
+  }[] = []
   for (let i = 5; i >= 0; i--) {
     const d = new Date(Date.UTC(limaYear, limaMonth - i, 1))
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
     const raw = d.toLocaleString('es-PE', { month: 'short', timeZone: 'UTC' })
-    months.push({ key, mes: raw.charAt(0).toUpperCase() + raw.slice(1, 3), ingresos: 0, gastos: 0 })
+    months.push({ key, mes: raw.charAt(0).toUpperCase() + raw.slice(1, 3), ingresos: 0, gastos: 0, altIngresos: 0, altGastos: 0 })
   }
 
+  // Primary source: movimientos_caja realized
   for (const mc of (realizedRes.data ?? []) as McR[]) {
     if (!mc.fecha_real) continue
     const entry = months.find(m => m.key === mc.fecha_real!.substring(0, 7))
@@ -173,7 +186,14 @@ export default async function InicioPage() {
     else if (mc.tipo === 'egreso') entry.gastos += mc.monto
   }
 
-  const chartData: ChartDataPoint[] = months.map(({ mes, ingresos, gastos }) => ({ mes, ingresos, gastos }))
+  // Fallback source: proyectos precio_venta by fecha_inicio, gastos by fecha_comprobante
+  // (itemsByProy is computed below — we defer this loop until after itemsByProy is built)
+  const gastosChart = (gastosChartRes.data ?? []) as GastoChartRaw[]
+  for (const g of gastosChart) {
+    if (!g.fecha_comprobante) continue
+    const entry = months.find(m => m.key === g.fecha_comprobante!.substring(0, 7))
+    if (entry) entry.altGastos += g.neto_a_pagar ?? 0
+  }
 
   // ── KPI data ─────────────────────────────────────────────────────────────
   const pending = (pendingRes.data ?? []) as McP[]
@@ -232,6 +252,21 @@ export default async function InicioPage() {
     acc[it.proyecto_id].gr += it.gasto_real
     return acc
   }, {})
+
+  // Ingresos fallback: precio_venta attributed to proyecto fecha_inicio month
+  for (const p of proyectos) {
+    if (!p.fecha_inicio) continue
+    const entry = months.find(m => m.key === p.fecha_inicio!.substring(0, 7))
+    if (!entry) continue
+    entry.altIngresos += (itemsByProy[p.id] ?? { pv: 0 }).pv
+  }
+
+  // Merge: use movimientos_caja when available, fall back to proyectos/gastos
+  const chartData: ChartDataPoint[] = months.map(m => ({
+    mes: m.mes,
+    ingresos: m.ingresos > 0 ? m.ingresos : m.altIngresos,
+    gastos:   m.gastos   > 0 ? m.gastos   : m.altGastos,
+  }))
 
   // ── Profitability table (top 5 non-closed, sorted by margin desc) ────────
   const rentabilidad: ProyectoRentabilidad[] = proyectos
