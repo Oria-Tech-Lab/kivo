@@ -14,6 +14,7 @@ import {
   LogOut,
   Landmark,
   PlusCircle,
+  FileCheck,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
@@ -25,6 +26,7 @@ const navItems = [
   { label: 'Proveedores',  href: '/proveedores',       icon: Building2      },
   { label: 'Presupuestos', href: '/presupuestos',      icon: FileText       },
   { label: 'Gastos',       href: '/gastos',            icon: Receipt        },
+  { label: 'Facturas',     href: '/facturas',          icon: FileCheck      },
   { label: 'GG',           href: '/gastos-generales',  icon: Landmark       },
   { label: 'Caja',         href: '/caja',              icon: Wallet         },
 ] as const

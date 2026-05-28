@@ -177,6 +177,13 @@ export interface ClienteData {
   contacto_email: string | null
 }
 
+export interface FacturaArchivoEntry {
+  path: string
+  name: string
+  size: number
+  uploaded_at: string
+}
+
 export interface FacturaProyecto {
   id: string
   proyecto_id: string
@@ -195,6 +202,7 @@ export interface FacturaProyecto {
   fecha_vencimiento: string | null
   fecha_cobro: string | null
   notas: string | null
+  archivos: FacturaArchivoEntry[]
   created_at: string
 }
 

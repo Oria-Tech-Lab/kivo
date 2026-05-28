@@ -21,7 +21,7 @@ const patchSchema = z.object({
 const SELECT = `
   id, proyecto_id, org_id, numero_factura, subtotal, aplica_igv, igv,
   aplica_detraccion, pct_detraccion, monto_detraccion, total, cliente_abona,
-  estado, fecha_emision, fecha_vencimiento, fecha_cobro, notas, created_at
+  estado, fecha_emision, fecha_vencimiento, fecha_cobro, notas, archivos, created_at
 `
 
 export async function PUT(req: Request, { params }: Params) {

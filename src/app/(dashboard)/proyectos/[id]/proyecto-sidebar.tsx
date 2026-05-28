@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useId } from 'react'
 import Link from 'next/link'
 import {
   Tag, Check, ChevronDown, ChevronRight, Plus, Pencil,
-  Trash2, X, AlertTriangle, RefreshCw, User,
+  Trash2, X, AlertTriangle, RefreshCw, User, Upload, Paperclip,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 import { cn, formatDate, formatMoney, centavosToSoles, solesToCentavos } from '@/lib/utils'
-import type { ProyectoData, ProyectoItem, ClienteData, FacturaProyecto, TeamMember } from './page'
+import type { ProyectoData, ProyectoItem, ClienteData, FacturaProyecto, FacturaArchivoEntry, TeamMember } from './page'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -54,6 +54,22 @@ const FACTURA_ESTADO_CFG: Record<FacturaProyecto['estado'], { label: string; cls
 }
 
 const MAX_NOTAS = 500
+
+// ─── File helpers ─────────────────────────────────────────────────────────────
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+async function openStorageFile(path: string) {
+  const r = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(path)}&bucket=comprobantes`)
+  if (r.ok) {
+    const { url } = await r.json() as { url: string }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -316,11 +332,18 @@ function FacturaDialog({ open, onClose, factura, proyectoId, onSaved, defaultDet
   )
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [localArchivos, setLocalArchivos] = useState<FacturaArchivoEntry[]>(factura?.archivos ?? [])
+  const [removedPaths, setRemovedPaths] = useState<Set<string>>(new Set())
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const formId = useId()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (open) {
       setForm(emptyForm(factura ?? { aplica_detraccion: false, pct_detraccion: defaultDetPct > 0 ? defaultDetPct : 10 }))
+      setLocalArchivos(factura?.archivos ?? [])
+      setRemovedPaths(new Set())
+      setPendingFiles([])
       setErr(null)
     }
   }, [open, factura, defaultDetPct])
@@ -328,6 +351,21 @@ function FacturaDialog({ open, onClose, factura, proyectoId, onSaved, defaultDet
   const preview = calcPreview(form)
 
   const f = (k: keyof FacturaFormState, v: unknown) => setForm(prev => ({ ...prev, [k]: v }))
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    setPendingFiles(prev => [...prev, ...files])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function removeExistingFile(path: string) {
+    setLocalArchivos(prev => prev.filter(a => a.path !== path))
+    setRemovedPaths(prev => new Set(Array.from(prev).concat(path)))
+  }
+
+  function removePendingFile(idx: number) {
+    setPendingFiles(prev => prev.filter((_, i) => i !== idx))
+  }
 
   async function handleSave() {
     if (!form.numero_factura.trim()) { setErr('El número de factura es requerido'); return }
@@ -360,7 +398,34 @@ function FacturaDialog({ open, onClose, factura, proyectoId, onSaved, defaultDet
         setErr(d.error ?? `Error ${res.status}`)
         return
       }
-      onSaved(await res.json() as FacturaProyecto)
+      const savedFactura = await res.json() as FacturaProyecto
+
+      // Handle removed files
+      for (const path of Array.from(removedPaths)) {
+        await fetch(`/api/proyectos/${proyectoId}/facturas/${savedFactura.id}/archivos`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path }),
+        }).catch(() => { /* silent */ })
+      }
+
+      // Upload new files
+      let finalArchivos: FacturaArchivoEntry[] = (savedFactura.archivos ?? [])
+        .filter(a => !removedPaths.has(a.path))
+
+      for (const file of pendingFiles) {
+        const fd = new FormData()
+        fd.append('file', file)
+        const r = await fetch(`/api/proyectos/${proyectoId}/facturas/${savedFactura.id}/archivos`, {
+          method: 'POST', body: fd,
+        })
+        if (r.ok) {
+          const updated = await r.json() as FacturaProyecto
+          finalArchivos = updated.archivos ?? finalArchivos
+        }
+      }
+
+      onSaved({ ...savedFactura, archivos: finalArchivos })
       onClose()
     } finally { setSaving(false) }
   }
@@ -470,6 +535,57 @@ function FacturaDialog({ open, onClose, factura, proyectoId, onSaved, defaultDet
               className="w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-400"
             />
           </div>
+
+          {/* Archivos adjuntos */}
+          <div>
+            <label className="block text-xs font-medium text-zinc-500 mb-2">
+              Archivos adjuntos
+              <span className="text-zinc-400 font-normal"> (PDF, JPEG, PNG — máx. 10 MB c/u)</span>
+            </label>
+
+            {/* Existing files */}
+            {localArchivos.length > 0 && (
+              <div className="mb-2 space-y-1">
+                {localArchivos.map(a => (
+                  <div key={a.path} className="flex items-center gap-2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs">
+                    <button type="button" onClick={() => openStorageFile(a.path)}
+                      className="flex-1 truncate text-left text-blue-600 hover:underline flex items-center gap-1.5 min-w-0">
+                      <Paperclip size={10} className="shrink-0" />
+                      <span className="truncate">{a.name}</span>
+                    </button>
+                    <span className="text-zinc-400 shrink-0 tabular-nums">{formatFileSize(a.size)}</span>
+                    <button type="button" onClick={() => removeExistingFile(a.path)}
+                      className="text-zinc-300 hover:text-red-500 shrink-0"><X size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Pending files (queued for upload) */}
+            {pendingFiles.length > 0 && (
+              <div className="mb-2 space-y-1">
+                {pendingFiles.map((file, idx) => (
+                  <div key={idx} className="flex items-center gap-2 rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs">
+                    <span className="flex-1 truncate text-blue-700 flex items-center gap-1.5 min-w-0">
+                      <Upload size={10} className="shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                    </span>
+                    <span className="text-zinc-400 shrink-0 tabular-nums">{formatFileSize(file.size)}</span>
+                    <button type="button" onClick={() => removePendingFile(idx)}
+                      className="text-zinc-300 hover:text-red-500 shrink-0"><X size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* File picker */}
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-300 px-3 py-3 text-xs text-zinc-400 hover:border-zinc-400 hover:text-zinc-600 transition-colors">
+              <Upload size={14} />
+              Agregar archivos…
+              <input ref={fileInputRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png"
+                onChange={handleFileSelect} className="sr-only" />
+            </label>
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-2 border-t border-zinc-100">
@@ -485,11 +601,12 @@ function FacturaDialog({ open, onClose, factura, proyectoId, onSaved, defaultDet
 
 // ─── Factura Card ─────────────────────────────────────────────────────────────
 
-function FacturaCard({ factura, canEdit, onEdit, onDelete }: {
+function FacturaCard({ factura, canEdit, onEdit, onDelete, onEstadoChange }: {
   factura: FacturaProyecto
   canEdit: boolean
   onEdit: () => void
   onDelete: () => void
+  onEstadoChange: (estado: FacturaProyecto['estado']) => void
 }) {
   const [expanded, setExpanded] = useState(true)
   const cfg = FACTURA_ESTADO_CFG[factura.estado]
@@ -499,7 +616,21 @@ function FacturaCard({ factura, canEdit, onEdit, onDelete }: {
       <div className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-zinc-50" onClick={() => setExpanded(v => !v)}>
         {expanded ? <ChevronDown size={13} className="text-zinc-400 shrink-0" /> : <ChevronRight size={13} className="text-zinc-400 shrink-0" />}
         <span className="text-sm font-medium text-zinc-800 flex-1 min-w-0 truncate">{factura.numero_factura}</span>
-        <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0', cfg.cls)}>{cfg.label}</span>
+        {canEdit ? (
+          <select
+            value={factura.estado}
+            onClick={e => e.stopPropagation()}
+            onChange={e => onEstadoChange(e.target.value as FacturaProyecto['estado'])}
+            className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold border-0 outline-none cursor-pointer shrink-0', cfg.cls)}
+            style={{ appearance: 'none' }}
+          >
+            {Object.entries(FACTURA_ESTADO_CFG).map(([v, { label }]) => (
+              <option key={v} value={v}>{label}</option>
+            ))}
+          </select>
+        ) : (
+          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0', cfg.cls)}>{cfg.label}</span>
+        )}
         {canEdit && (
           <div className="flex items-center gap-0.5 shrink-0">
             <button onClick={e => { e.stopPropagation(); onEdit() }} className="p-1 text-zinc-400 hover:text-zinc-700 rounded"><Pencil size={11} /></button>
@@ -518,6 +649,18 @@ function FacturaCard({ factura, canEdit, onEdit, onDelete }: {
           {factura.fecha_emision && <div className="flex justify-between text-zinc-400"><span>Emisión</span><span>{formatDate(factura.fecha_emision)}</span></div>}
           {factura.fecha_vencimiento && <div className="flex justify-between text-zinc-400"><span>Vencimiento</span><span>{formatDate(factura.fecha_vencimiento)}</span></div>}
           {factura.fecha_cobro && <div className="flex justify-between text-zinc-400"><span>Cobro</span><span>{formatDate(factura.fecha_cobro)}</span></div>}
+          {factura.archivos?.length > 0 && (
+            <div className="border-t border-zinc-100 pt-1.5 space-y-1">
+              {factura.archivos.map((a, i) => (
+                <button key={i} type="button" onClick={() => openStorageFile(a.path)}
+                  className="flex w-full items-center gap-1.5 text-left text-blue-600 hover:underline truncate">
+                  <Paperclip size={10} className="shrink-0" />
+                  <span className="truncate">{a.name}</span>
+                  <span className="ml-auto text-zinc-400 shrink-0">{formatFileSize(a.size)}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -937,6 +1080,17 @@ export function ProyectoSidebar({
               <FacturaCard key={f.id} factura={f} canEdit={canEdit}
                 onEdit={() => setFacturaDialog({ open: true, factura: f })}
                 onDelete={() => deleteFactura(f.id)}
+                onEstadoChange={async (estado) => {
+                  const res = await fetch(`/api/proyectos/${proyecto.id}/facturas/${f.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ estado, fecha_cobro: estado === 'cobrada' ? new Date().toISOString().split('T')[0] : null }),
+                  })
+                  if (res.ok) {
+                    const updated = await res.json() as FacturaProyecto
+                    setFacturas(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x))
+                  }
+                }}
               />
             ))}
           </div>
