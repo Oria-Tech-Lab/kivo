@@ -677,7 +677,7 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
               : 'Aún no hay proyectos registrados.'}
           </p>
           {canEdit && !search && clienteFilter === 'all' && tipoFilter === 'all' && estadoFilter === 'all' && (
-            <p className="mt-2 text-xs text-zinc-400">Crea tu primer proyecto con el botón "Nuevo Proyecto".</p>
+            <p className="mt-2 text-xs text-zinc-400">Crea tu primer proyecto con el botón &quot;Nuevo Proyecto&quot;.</p>
           )}
         </div>
       ) : viewMode === 'table' ? (

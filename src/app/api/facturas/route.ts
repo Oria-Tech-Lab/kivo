@@ -28,7 +28,7 @@ const SELECT = `
  * GET /api/facturas
  * Todas las facturas de la org, con proyecto y cliente.
  */
-export async function GET(_req: Request) {
+export async function GET() {
   const auth = await requireAuth()
   if (auth instanceof NextResponse) return auth
 
