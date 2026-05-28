@@ -67,11 +67,11 @@ function margenStyle(pct: number): { color: string; bg: string } {
   return { color: '#dc2626', bg: '#fef2f2' }
 }
 
-function healthLabel(avg: number): { label: string; color: string } {
-  if (avg >= 35) return { label: 'Excelente', color: '#10b981' }
-  if (avg >= 25) return { label: 'Buena',     color: '#60a5fa' }
-  if (avg >= 15) return { label: 'Regular',   color: '#fbbf24' }
-  return           { label: 'Crítica',    color: '#f87171' }
+function healthLabel(avg: number): { label: string } {
+  if (avg >= 35) return { label: 'Excelente' }
+  if (avg >= 25) return { label: 'Buena'     }
+  if (avg >= 15) return { label: 'Regular'   }
+  return           { label: 'Crítica'    }
 }
 
 function FeaturedProjectCard({ proyecto }: { proyecto: ProyectoConMetricas }) {
@@ -207,7 +207,7 @@ function PortfolioHealthCard({ proyectos }: { proyectos: ProyectoConMetricas[] }
       </div>
 
       <div className="mb-3">
-        <p className="text-3xl font-black leading-none" style={{ color: health.color }}>
+        <p className="text-2xl font-medium leading-none" style={{ color: 'rgba(255,255,255,0.8)' }}>
           {health.label}
         </p>
         <p className="text-sm mt-1" style={{ color: '#bfdbfe' }}>
