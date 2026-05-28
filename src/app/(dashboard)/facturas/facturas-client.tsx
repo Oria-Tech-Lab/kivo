@@ -182,7 +182,7 @@ function KpiCard({ title, value, sub, color, icon }: {
   title: string; value: string; sub: string; color?: string; icon?: React.ReactNode
 }) {
   return (
-    <div className="shrink-0 w-44 rounded-xl border border-zinc-200 bg-white p-4">
+    <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="flex items-start justify-between mb-1">
         <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">{title}</p>
         {icon}
@@ -200,7 +200,7 @@ function KpiRow({ kpis }: { kpis: FacturaKpis }) {
     : kpis.diasPromedioCobro < 30 ? '#059669'
     : kpis.diasPromedioCobro <= 45 ? '#d97706' : '#dc2626'
   return (
-    <div className="flex gap-3 overflow-x-auto pb-1 -mx-6 px-6">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       <KpiCard title="Total facturado" value={formatMoney(kpis.totalFacturado)} sub={`${kpis.countTotal} facturas`} />
       <KpiCard title="Por cobrar" value={formatMoney(kpis.porCobrar)} sub={`${kpis.countPendientes} pendientes`} color="#2563eb" />
       <KpiCard title={`Cobrado ${kpis.mesNombre}`} value={formatMoney(kpis.cobradoEsteMes)} sub={`${kpis.countCobradoMes} cobradas`} color="#059669" />
@@ -998,27 +998,57 @@ export function FacturasClient({ initialFacturas, proyectos, clientes }: Props) 
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(f => (
-            <div key={f.id} onClick={() => openFactura(f)} className="rounded-xl border border-zinc-200 bg-white p-4 cursor-pointer hover:border-zinc-300 transition-colors space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-mono text-sm font-medium text-zinc-900">{f.numero_factura}</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">{f.proyecto?.nombre ?? '—'}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {filtered.map(f => {
+            const vencInfo = vencimientoLabel(f.fecha_vencimiento)
+            const archCount = (f.archivos ?? []).length
+            return (
+              <div key={f.id} onClick={() => openFactura(f)} className="rounded-xl border border-zinc-200 bg-white p-4 cursor-pointer hover:border-zinc-300 transition-colors">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm font-semibold text-zinc-900">{f.numero_factura}</p>
+                    <p className="text-xs text-zinc-600 mt-0.5 truncate">{f.proyecto?.nombre ?? '—'}</p>
+                    {f.proyecto?.cliente && <p className="text-[11px] text-zinc-400 truncate">{f.proyecto.cliente.nombre}</p>}
+                  </div>
+                  <Badge variant="outline" className={cn('text-xs shrink-0', ESTADO_CFG[f.estado].cls)}>{ESTADO_CFG[f.estado].label}</Badge>
                 </div>
-                <Badge variant="outline" className={cn('text-xs shrink-0', ESTADO_CFG[f.estado].cls)}>{ESTADO_CFG[f.estado].label}</Badge>
+
+                {/* Montos */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 py-3 border-t border-b border-zinc-100">
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 mb-0.5">Subtotal</p>
+                    <p className="text-sm tabular-nums text-zinc-700">{formatMoney(f.subtotal)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 mb-0.5">IGV</p>
+                    <p className="text-sm tabular-nums text-zinc-500">{f.aplica_igv ? formatMoney(f.igv) : <span className="text-zinc-300">—</span>}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 mb-0.5">Total</p>
+                    <p className="text-sm font-bold tabular-nums text-zinc-900">{formatMoney(f.total)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 mb-0.5">Cliente abona</p>
+                    <p className="text-sm font-bold tabular-nums" style={{ color: '#059669' }}>{formatMoney(f.cliente_abona)}</p>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between mt-3 text-[11px]">
+                  <div className="flex items-center gap-2 text-zinc-400">
+                    {f.fecha_emision && <span>Emitida {formatDate(f.fecha_emision)}</span>}
+                    {archCount > 0 && <span className="flex items-center gap-0.5"><Paperclip size={11} />{archCount}</span>}
+                  </div>
+                  {f.fecha_vencimiento && (
+                    <span className={cn(vencInfo?.red ? 'text-red-600 font-medium' : 'text-zinc-400')}>
+                      Vence {formatDate(f.fecha_vencimiento)}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div><p className="text-zinc-400">Total</p><p className="font-bold text-zinc-900 tabular-nums">{formatMoney(f.total)}</p></div>
-                <div><p className="text-zinc-400">Cliente abona</p><p className="font-bold tabular-nums" style={{ color: '#059669' }}>{formatMoney(f.cliente_abona)}</p></div>
-              </div>
-              {f.fecha_vencimiento && (
-                <p className={cn('text-xs', vencimientoLabel(f.fecha_vencimiento)?.red ? 'text-red-600' : 'text-zinc-400')}>
-                  Vence: {formatDate(f.fecha_vencimiento)}
-                </p>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
