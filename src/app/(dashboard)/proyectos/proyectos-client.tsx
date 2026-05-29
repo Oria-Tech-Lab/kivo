@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   Search, LayoutGrid, Table2, AlertTriangle, ChevronRight,
   MoreHorizontal, Plus, Pencil, Trash2, Activity, TrendingUp, SlidersHorizontal,
+  Calendar, X,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -94,6 +95,55 @@ const FASE_LABEL: Record<string, string> = {
   cotizacion: 'Cotización',
   ejecucion:  'En ejecución',
   finalizado: 'Finalizado',
+}
+
+// ─── Period filter ─────────────────────────────────────────────────────────────
+
+type PeriodoPreset = 'all' | 'este_mes' | 'mes_anterior' | 'ultimos_3m' | 'este_anio' | 'custom'
+
+const PERIODO_PRESETS: { value: PeriodoPreset; label: string }[] = [
+  { value: 'este_mes',      label: 'Este mes'       },
+  { value: 'mes_anterior',  label: 'Mes anterior'   },
+  { value: 'ultimos_3m',    label: 'Últimos 3 meses'},
+  { value: 'este_anio',     label: 'Este año'       },
+  { value: 'custom',        label: 'Personalizado'  },
+]
+
+function computePeriodoRange(
+  preset: PeriodoPreset,
+  customDesde: string,
+  customHasta: string,
+): { from: string; to: string } | null {
+  if (preset === 'all') return null
+  if (preset === 'custom') {
+    if (!customDesde || !customHasta) return null
+    return { from: customDesde, to: customHasta }
+  }
+  const today = new Date()
+  const y = today.getFullYear()
+  const m = today.getMonth()
+  switch (preset) {
+    case 'este_mes':
+      return {
+        from: `${y}-${String(m + 1).padStart(2, '0')}-01`,
+        to: `${y}-${String(m + 1).padStart(2, '0')}-${new Date(y, m + 1, 0).getDate()}`,
+      }
+    case 'mes_anterior': {
+      const pm = m === 0 ? 11 : m - 1
+      const py = m === 0 ? y - 1 : y
+      return {
+        from: `${py}-${String(pm + 1).padStart(2, '0')}-01`,
+        to: `${py}-${String(pm + 1).padStart(2, '0')}-${new Date(py, pm + 1, 0).getDate()}`,
+      }
+    }
+    case 'ultimos_3m': {
+      const d = new Date(today)
+      d.setMonth(d.getMonth() - 3)
+      return { from: d.toISOString().split('T')[0], to: today.toISOString().split('T')[0] }
+    }
+    case 'este_anio':
+      return { from: `${y}-01-01`, to: `${y}-12-31` }
+  }
 }
 
 function margenStyle(pct: number): { color: string; bg: string } {
@@ -583,6 +633,9 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [periodoPreset, setPeriodoPreset] = useState<PeriodoPreset>('all')
+  const [customDesde, setCustomDesde] = useState('')
+  const [customHasta, setCustomHasta] = useState('')
 
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
     if (typeof window === 'undefined') return new Set(DEFAULT_VISIBLE_COLS)
@@ -619,11 +672,19 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
   }, [proyectos])
 
+  const periodoRange = useMemo(
+    () => computePeriodoRange(periodoPreset, customDesde, customHasta),
+    [periodoPreset, customDesde, customHasta],
+  )
+
   const filtered = useMemo(() => {
     return proyectos.filter(p => {
       if (estadoFilter !== 'all' && p.estado !== estadoFilter) return false
       if (clienteFilter !== 'all' && p.cliente?.id !== clienteFilter) return false
       if (tipoFilter !== 'all' && p.tipo !== tipoFilter) return false
+      if (periodoRange) {
+        if (p.fecha_inicio < periodoRange.from || p.fecha_inicio > periodoRange.to) return false
+      }
       if (search) {
         const q = search.toLowerCase()
         const matchNombre = p.nombre.toLowerCase().includes(q)
@@ -632,7 +693,7 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
       }
       return true
     })
-  }, [proyectos, estadoFilter, clienteFilter, tipoFilter, search])
+  }, [proyectos, estadoFilter, clienteFilter, tipoFilter, periodoRange, search])
 
   async function handleDelete(id: string, nombre: string) {
     if (!confirm(`¿Eliminar "${nombre}"? Esta acción no se puede deshacer.`)) return
@@ -723,6 +784,81 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
             ))}
           </SelectContent>
         </Select>
+
+        {/* Period filter */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className={cn(
+              'flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs font-medium transition-colors',
+              periodoPreset !== 'all'
+                ? 'border-zinc-900 bg-zinc-900 text-white'
+                : 'border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900 hover:border-zinc-300',
+            )}>
+              <Calendar size={13} />
+              {periodoPreset === 'all'
+                ? 'Período'
+                : (PERIODO_PRESETS.find(p => p.value === periodoPreset)?.label ?? 'Período')}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-52 p-2" align="start">
+            <p className="mb-2 px-1 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Filtrar por inicio</p>
+            {PERIODO_PRESETS.map(opt => (
+              <button
+                key={opt.value}
+                className={cn(
+                  'w-full text-left rounded px-2 py-1.5 text-sm transition-colors',
+                  periodoPreset === opt.value
+                    ? 'bg-zinc-900 text-white'
+                    : 'text-zinc-700 hover:bg-zinc-50',
+                )}
+                onClick={() => setPeriodoPreset(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+            {periodoPreset === 'custom' && (
+              <div className="mt-2 space-y-2 border-t border-zinc-100 pt-2">
+                <div>
+                  <p className="text-xs text-zinc-400 mb-1">Desde</p>
+                  <Input
+                    type="date"
+                    value={customDesde}
+                    onChange={e => setCustomDesde(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-400 mb-1">Hasta</p>
+                  <Input
+                    type="date"
+                    value={customHasta}
+                    onChange={e => setCustomHasta(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            )}
+            {periodoPreset !== 'all' && (
+              <button
+                className="mt-2 w-full rounded px-2 py-1.5 text-xs text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 transition-colors text-left"
+                onClick={() => { setPeriodoPreset('all'); setCustomDesde(''); setCustomHasta('') }}
+              >
+                Limpiar filtro
+              </button>
+            )}
+          </PopoverContent>
+        </Popover>
+
+        {/* Active period pill */}
+        {periodoPreset === 'custom' && customDesde && customHasta && (
+          <button
+            className="flex items-center gap-1 rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
+            onClick={() => { setPeriodoPreset('all'); setCustomDesde(''); setCustomHasta('') }}
+          >
+            {formatDate(customDesde)} – {formatDate(customHasta)}
+            <X size={10} className="opacity-70" />
+          </button>
+        )}
 
         {/* Column selector + View toggle */}
         <div className="ml-auto flex items-center gap-2">
