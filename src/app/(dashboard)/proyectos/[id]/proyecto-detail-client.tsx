@@ -139,6 +139,7 @@ export function ProyectoDetailClient({
   const [saving, setSaving]           = useState<string | null>(null)
   const [adding, setAdding]           = useState(false)
   const [apiError, setApiError]       = useState<string | null>(null)
+  const pendingTempRef = useRef<{ tempId: string; patch: Record<string, unknown> } | null>(null)
   const [filterProv, setFilterProv]   = useState<string | null>(null)
   const [showFinalizarDialog, setShowFinalizarDialog] = useState(false)
   const [finalizando, setFinalizando] = useState(false)
@@ -251,12 +252,19 @@ export function ProyectoDetailClient({
 
   // ── Save helpers ─────────────────────────────────────────────────────────────
 
-  async function saveFields(itemId: string, fields: Record<string, unknown>) {
+  async function saveFields(itemId: string, fields: Record<string, unknown>, opts: { silent?: boolean } = {}) {
     // Optimistic update — UI reflects change immediately
     const snapshot = items
     setItems(prev => prev.map(i => i.id === itemId ? { ...i, ...fields } as ProyectoItem : i))
 
-    setSaving(itemId)
+    // If this item is still being created (INSERT in flight), accumulate patch and return
+    if (pendingTempRef.current?.tempId === itemId) {
+      pendingTempRef.current.patch = { ...pendingTempRef.current.patch, ...fields }
+      if (!opts.silent) setEditingCell(null)
+      return
+    }
+
+    if (!opts.silent) setSaving(itemId)
     try {
       const res = await fetch(`/api/proyectos/${proyecto.id}/items/${itemId}`, {
         method: 'PUT',
@@ -276,12 +284,12 @@ export function ProyectoDetailClient({
       setItems(snapshot) // revert on network error
       showError('Error de red al guardar')
     } finally {
-      setSaving(null)
-      setEditingCell(null)
+      if (!opts.silent) setSaving(null)
+      if (!opts.silent) setEditingCell(null)
     }
   }
 
-  async function saveCell(itemId: string, field: string, raw: unknown) {
+  async function saveCell(itemId: string, field: string, raw: unknown, silent?: boolean) {
     const item = items.find(i => i.id === itemId)
     if (!item) return
 
@@ -311,12 +319,39 @@ export function ProyectoDetailClient({
       fields[field] = raw
     }
 
-    await saveFields(itemId, fields)
+    await saveFields(itemId, fields, { silent })
   }
 
   async function addItem(focusField: 'concepto' | 'gasto_real' = 'concepto') {
     if (!canEdit || adding) return
+
+    // Insert row in local state immediately — no await before this
+    const tempId = crypto.randomUUID()
+    const tempItem: ProyectoItem = {
+      id: tempId,
+      concepto: '',
+      unidad: 'global',
+      proveedor_id: null,
+      costo_estimado: 0,
+      precio_venta: 0,
+      gasto_real: 0,
+      cantidad: 1,
+      precio_unitario: 0,
+      tipo_comprobante: null,
+      estado_pago: 'pendiente',
+      fecha_pago: null,
+      foto_url: null,
+      factura_url: null,
+      constancia_pago_url: null,
+      sort_order: items.length,
+      created_at: new Date().toISOString(),
+      proveedor: null,
+    }
+    pendingTempRef.current = { tempId, patch: {} }
+    setItems(prev => [...prev, tempItem])
+    setEditingCell({ id: tempId, field: focusField })
     setAdding(true)
+
     try {
       const res = await fetch(`/api/proyectos/${proyecto.id}/items`, {
         method: 'POST',
@@ -325,14 +360,34 @@ export function ProyectoDetailClient({
       })
       if (res.ok) {
         const newItem = await res.json() as ProyectoItem
-        setItems(prev => [...prev, newItem])
-        setTimeout(() => setEditingCell({ id: newItem.id, field: focusField }), 50)
+        const pending = pendingTempRef.current
+        pendingTempRef.current = null
+        // Merge any local edits made while INSERT was in flight
+        const mergedItem = pending?.patch && Object.keys(pending.patch).length > 0
+          ? { ...newItem, ...pending.patch } as ProyectoItem
+          : newItem
+        setItems(prev => prev.map(i => i.id === tempId ? mergedItem : i))
+        setEditingCell(prev => prev?.id === tempId ? { id: newItem.id, field: prev.field } : prev)
+        // Persist any pending patch to the real item
+        if (pending?.patch && Object.keys(pending.patch).length > 0) {
+          fetch(`/api/proyectos/${proyecto.id}/items/${newItem.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pending.patch),
+          }).catch(() => {})
+        }
       } else {
         const body = await res.json().catch(() => ({})) as { error?: string; code?: string; details?: string; hint?: string }
         const detail = [body.code, body.details, body.hint].filter(Boolean).join(' — ')
+        pendingTempRef.current = null
+        setItems(prev => prev.filter(i => i.id !== tempId))
+        setEditingCell(null)
         showError(detail ? `${body.error}: ${detail}` : (body.error ?? `Error ${res.status}`))
       }
     } catch {
+      pendingTempRef.current = null
+      setItems(prev => prev.filter(i => i.id !== tempId))
+      setEditingCell(null)
       showError('Error de red. Verifica tu conexión.')
     } finally {
       setAdding(false)
@@ -829,7 +884,7 @@ interface ItemRowProps {
   canDelete: boolean
   show: (col: ColKey) => boolean
   onStartEdit: (id: string, field: string) => void
-  onSave: (id: string, field: string, value: unknown) => Promise<void>
+  onSave: (id: string, field: string, value: unknown, silent?: boolean) => Promise<void>
   onSaveFields: (id: string, fields: Record<string, unknown>) => Promise<void>
   onDelete: (id: string) => Promise<void>
   onProveedorCreated: (p: Proveedor) => void
@@ -856,7 +911,7 @@ function ItemRow({
       {/* Concepto */}
       <td className="px-4 py-2.5" onClick={() => onStartEdit(item.id, 'concepto')}>
         {isEditing('concepto') ? (
-          <InlineInput defaultValue={item.concepto} onSave={v => onSave(item.id, 'concepto', v)} placeholder="Describe el ítem..." />
+          <InlineInput defaultValue={item.concepto} onSave={(v, silent) => onSave(item.id, 'concepto', v, silent)} placeholder="Describe el ítem..." />
         ) : (
           <span className={cn('block text-sm', canEdit && 'cursor-text', !item.concepto && 'text-zinc-300 italic')}>
             {item.concepto || (canEdit ? 'Concepto…' : '—')}
@@ -1095,14 +1150,38 @@ function InlineEstadoPago({ item, canEdit, onSave }: {
 
 // ─── Inline Inputs ─────────────────────────────────────────────────────────────
 
-function InlineInput({ defaultValue, onSave, placeholder }: { defaultValue: string; onSave: (v: string) => void; placeholder?: string }) {
-  const ref = useRef<HTMLInputElement>(null)
+function InlineInput({ defaultValue, onSave, placeholder }: { defaultValue: string; onSave: (v: string, silent?: boolean) => void; placeholder?: string }) {
+  const ref      = useRef<HTMLInputElement>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => { ref.current?.focus(); ref.current?.select() }, [])
+
+  function cancelDebounce() {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const value = e.target.value
+    cancelDebounce()
+    timerRef.current = setTimeout(() => { timerRef.current = null; onSave(value, true) }, 400)
+  }
+
+  function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
+    cancelDebounce()
+    onSave(e.target.value)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+    if (e.key === 'Escape') { cancelDebounce(); onSave(defaultValue); (e.target as HTMLInputElement).blur() }
+  }
+
   return (
     <input ref={ref} defaultValue={defaultValue} placeholder={placeholder}
       className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-200"
-      onBlur={e => onSave(e.target.value)}
-      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') onSave(defaultValue) }}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
     />
   )
 }
