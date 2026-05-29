@@ -31,10 +31,13 @@ const TIPO_OPTIONS = [
   { value: 'instalacion', label: 'Instalación' },
   { value: 'otro',        label: 'Otro'        },
 ]
-const ESTADO_OPTIONS = [
-  { value: 'activo',   label: 'Activo',   cls: 'text-emerald-700', dot: 'bg-emerald-500' },
-  { value: 'en_pausa', label: 'En pausa', cls: 'text-amber-700',   dot: 'bg-amber-400'   },
-  { value: 'cerrado',  label: 'Cerrado',  cls: 'text-zinc-500',    dot: 'bg-zinc-400'     },
+type FaseProyecto = 'cotizacion' | 'aprobado' | 'ejecucion' | 'finalizado'
+
+const FASE_OPTIONS: { value: FaseProyecto; label: string }[] = [
+  { value: 'cotizacion', label: 'Cotización' },
+  { value: 'aprobado',   label: 'Aprobado' },
+  { value: 'ejecucion',  label: 'En ejecución' },
+  { value: 'finalizado', label: 'Finalizado' },
 ]
 const PCT_DETRACCION_VENTA = [
   { value: '4',  label: '4%'  },
@@ -683,7 +686,7 @@ export function ProyectoSidebar({
   const [facturas, setFacturas]       = useState<FacturaProyecto[]>(initialFacturas)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [notas, setNotas]             = useState(proyecto.notas ?? '')
-  const [estadoSaved, setEstadoSaved] = useState(false)
+  const [faseSaved, setFaseSaved]     = useState(false)
   const [infoSaved, setInfoSaved]     = useState(false)
   const [notasSaved, setNotasSaved]   = useState(false)
   const [facturaSaved, setFacturaSaved] = useState(false)
@@ -732,7 +735,7 @@ export function ProyectoSidebar({
   const diferencia        = subtotalEfectivo - totalFacturado
 
   const hoy = new Date()
-  const cierreVencido = proyecto.fecha_cierre_est && new Date(proyecto.fecha_cierre_est) < hoy && proyecto.estado !== 'cerrado'
+  const cierreVencido = proyecto.fecha_cierre_est && new Date(proyecto.fecha_cierre_est) < hoy && proyecto.fase !== 'finalizado'
 
   // ── API helper ──────────────────────────────────────────────────────────────
 
@@ -751,12 +754,12 @@ export function ProyectoSidebar({
     setter(true); setTimeout(() => setter(false), 2000)
   }
 
-  // ── Estado ──────────────────────────────────────────────────────────────────
+  // ── Fase ────────────────────────────────────────────────────────────────────
 
-  async function handleEstadoChange(next: string) {
-    onProyectoUpdate({ estado: next })
-    await patch({ estado: next as ProyectoData['estado'] })
-    flash(setEstadoSaved)
+  async function handleFaseChange(newFase: FaseProyecto) {
+    onProyectoUpdate({ fase: newFase })
+    await patch({ fase: newFase })
+    flash(setFaseSaved)
   }
 
   // ── Notas ───────────────────────────────────────────────────────────────────
@@ -842,31 +845,25 @@ export function ProyectoSidebar({
     if (res.ok) setFacturas(prev => prev.filter(f => f.id !== id))
   }
 
-  const estadoCfg = ESTADO_OPTIONS.find(o => o.value === proyecto.estado)
-
   return (
     <div className="flex flex-col">
 
-      {/* ── 1. ESTADO ────────────────────────────────────────────────────── */}
+      {/* ── 1. FASE ──────────────────────────────────────────────────────── */}
       <div className="p-5">
         <div className="flex items-center justify-between mb-3">
-          <SectionTitle>Estado del proyecto</SectionTitle>
-          <SavedBadge show={estadoSaved} />
+          <SectionTitle>Fase del proyecto</SectionTitle>
+          <SavedBadge show={faseSaved} />
         </div>
         {canEdit ? (
           <>
-            <select value={proyecto.estado} onChange={e => handleEstadoChange(e.target.value)}
+            <select
+              value={proyecto.fase ?? 'cotizacion'}
+              onChange={e => handleFaseChange(e.target.value as FaseProyecto)}
               className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
             >
-              {ESTADO_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {FASE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            {estadoCfg && (
-              <div className={cn('mt-2 flex items-center gap-1.5 text-xs font-medium', estadoCfg.cls)}>
-                <span className={cn('inline-block h-2 w-2 rounded-full', estadoCfg.dot)} />
-                {estadoCfg.label}
-              </div>
-            )}
-            {proyecto.estado !== 'cerrado' && onConcluir && (
+            {proyecto.fase !== 'finalizado' && onConcluir && (
               <button
                 onClick={onConcluir}
                 className="mt-3 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 transition-colors flex items-center justify-center gap-2"
@@ -876,12 +873,9 @@ export function ProyectoSidebar({
             )}
           </>
         ) : (
-          estadoCfg && (
-            <div className={cn('flex items-center gap-1.5 text-sm font-medium', estadoCfg.cls)}>
-              <span className={cn('inline-block h-2 w-2 rounded-full', estadoCfg.dot)} />
-              {estadoCfg.label}
-            </div>
-          )
+          <p className="text-sm font-medium text-zinc-700">
+            {FASE_OPTIONS.find(o => o.value === (proyecto.fase ?? 'cotizacion'))?.label ?? 'Cotización'}
+          </p>
         )}
       </div>
 

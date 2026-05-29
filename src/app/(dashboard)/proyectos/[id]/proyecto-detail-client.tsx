@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ChevronLeft, Plus, Trash2, Check, X,
@@ -164,7 +163,6 @@ export function ProyectoDetailClient({
   proyecto: initialProyecto, initialItems, proveedores: initialProveedores,
   gastos, indirecto, rol, clientes, initialFacturas,
 }: Props) {
-  const router = useRouter()
   const [proyecto, setProyecto]       = useState<ProyectoData>(initialProyecto)
   const [items, setItems]             = useState<ProyectoItem[]>(initialItems)
   const [proveedores, setProveedores] = useState<Proveedor[]>(initialProveedores)
@@ -190,6 +188,15 @@ export function ProyectoDetailClient({
   const [fase, setFase]           = useState<FaseProyecto>((proyecto.fase as FaseProyecto) ?? 'cotizacion')
   const [faseTarget, setFaseTarget] = useState<FaseProyecto | null>(null)
   const [savingFase, setSavingFase] = useState(false)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+
+  // Sync local fase state when proyecto.fase is updated (e.g. via sidebar selector)
+  useEffect(() => { setFase((proyecto.fase as FaseProyecto) ?? 'cotizacion') }, [proyecto.fase])
+
+  function showSuccess(msg: string) {
+    setSuccessMsg(msg)
+    setTimeout(() => setSuccessMsg(null), 4000)
+  }
 
   const [selectedIds, setSelectedIds]         = useState<Set<string>>(new Set())
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false)
@@ -284,6 +291,7 @@ export function ProyectoDetailClient({
     setSavingFase(true)
     const prevFase = fase
     setFase(newFase)
+    setProyecto(prev => ({ ...prev, fase: newFase }))
     setFaseTarget(null)
     try {
       const res = await fetch(`/api/proyectos/${proyecto.id}`, {
@@ -293,10 +301,12 @@ export function ProyectoDetailClient({
       })
       if (!res.ok) {
         setFase(prevFase)
+        setProyecto(prev => ({ ...prev, fase: prevFase }))
         showError('Error al cambiar la fase del proyecto')
       }
     } catch {
       setFase(prevFase)
+      setProyecto(prev => ({ ...prev, fase: prevFase }))
       showError('Error de red al cambiar la fase')
     } finally {
       setSavingFase(false)
@@ -567,12 +577,16 @@ export function ProyectoDetailClient({
   async function handleFinalizar() {
     setFinalizando(true)
     try {
-      await fetch(`/api/proyectos/${proyecto.id}`, {
+      const res = await fetch(`/api/proyectos/${proyecto.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ estado: 'cerrado' }),
+        body: JSON.stringify({ fase: 'finalizado' }),
       })
-      router.push('/proyectos')
+      if (res.ok) {
+        setFase('finalizado')
+        setProyecto(prev => ({ ...prev, fase: 'finalizado' }))
+        showSuccess('Proyecto marcado como finalizado')
+      }
     } finally {
       setFinalizando(false)
       setShowFinalizarDialog(false)
@@ -724,14 +738,14 @@ export function ProyectoDetailClient({
           <DialogHeader>
             <DialogTitle>Marcar proyecto como concluido</DialogTitle>
             <DialogDescription className="text-zinc-500 text-sm mt-1">
-              Se marcará el proyecto como <strong>Cerrado</strong>. Podrás seguir consultando
-              el historial pero no se podrán agregar nuevos ítems ni gastos.
+              Se marcará el proyecto como <strong>Finalizado</strong>. La tabla quedará en
+              solo lectura pero podrás seguir consultando el historial.
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowFinalizarDialog(false)}>Cancelar</Button>
             <Button size="sm" onClick={handleFinalizar} disabled={finalizando}>
-              {finalizando ? 'Cerrando...' : 'Confirmar cierre'}
+              {finalizando ? 'Guardando…' : 'Confirmar'}
             </Button>
           </div>
         </DialogContent>
@@ -772,6 +786,15 @@ export function ProyectoDetailClient({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Success banner */}
+      {successMsg && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-lg text-sm text-emerald-700 max-w-lg">
+          <Check size={15} className="shrink-0 text-emerald-500" />
+          <span>{successMsg}</span>
+          <button onClick={() => setSuccessMsg(null)} className="ml-auto text-emerald-400 hover:text-emerald-600"><X size={14} /></button>
+        </div>
+      )}
 
       {/* Error banner */}
       {apiError && (
