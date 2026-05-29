@@ -114,18 +114,16 @@ const ESTADO_ITEM_CFG: Record<EstadoItem, { cls: string }> = {
 
 // ─── Fase de proyecto ─────────────────────────────────────────────────────────
 
-type FaseProyecto = 'cotizacion' | 'aprobado' | 'ejecucion' | 'finalizado'
+type FaseProyecto = 'cotizacion' | 'ejecucion' | 'finalizado'
 
 const FASES: { value: FaseProyecto; label: string }[] = [
   { value: 'cotizacion', label: 'Cotización' },
-  { value: 'aprobado',   label: 'Aprobado' },
   { value: 'ejecucion',  label: 'En ejecución' },
   { value: 'finalizado', label: 'Finalizado' },
 ]
 
 const FASE_DESCRIPTIONS: Record<FaseProyecto, string> = {
   cotizacion: 'El proyecto vuelve a fase de cotización.',
-  aprobado:   'El cliente aprobó la propuesta. Los costos presupuestados quedarán como referencia.',
   ejecucion:  'El proyecto entra en ejecución. Se habilitará el registro de gastos reales.',
   finalizado: 'El proyecto se marcará como finalizado. La tabla quedará en solo lectura.',
 }
@@ -357,7 +355,7 @@ export function ProyectoDetailClient({
   const canDelete = rol === 'admin'
   // fase-based editing rules
   const canEditRow  = canEdit && fase !== 'finalizado'
-  const realDisabled = fase === 'cotizacion' || fase === 'aprobado'
+  const realDisabled = fase === 'cotizacion'
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 

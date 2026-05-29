@@ -34,11 +34,10 @@ const TIPO_OPTIONS = [
   { value: 'instalacion', label: 'Instalación' },
   { value: 'otro',        label: 'Otro'        },
 ]
-type FaseProyecto = 'cotizacion' | 'aprobado' | 'ejecucion' | 'finalizado'
+type FaseProyecto = 'cotizacion' | 'ejecucion' | 'finalizado'
 
 const FASE_OPTIONS: { value: FaseProyecto; label: string }[] = [
   { value: 'cotizacion', label: 'Cotización' },
-  { value: 'aprobado',   label: 'Aprobado' },
   { value: 'ejecucion',  label: 'En ejecución' },
   { value: 'finalizado', label: 'Finalizado' },
 ]

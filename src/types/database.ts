@@ -43,7 +43,7 @@ export interface Cliente {
 
 export type TipoProyecto = "digital" | "offline" | "evento" | "instalacion" | "otro";
 export type EstadoProyecto = "activo" | "en_pausa" | "cerrado";
-export type FaseProyecto = "cotizacion" | "aprobado" | "ejecucion" | "finalizado";
+export type FaseProyecto = "cotizacion" | "ejecucion" | "finalizado";
 export type DescuentoTipo = "pct" | "fijo";
 
 export interface Proyecto {

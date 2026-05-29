@@ -112,7 +112,7 @@ export interface ProyectoData {
   notas: string | null
   created_at: string
   org_id: string
-  fase: 'cotizacion' | 'aprobado' | 'ejecucion' | 'finalizado'
+  fase: 'cotizacion' | 'ejecucion' | 'finalizado'
   cliente_id: string | null
   responsable_id: string | null
   subtotal_proyecto: number

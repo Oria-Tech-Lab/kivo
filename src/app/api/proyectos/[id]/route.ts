@@ -20,7 +20,7 @@ const patchSchema = z.object({
   aplica_igv_venta:        z.boolean().optional(),
   aplica_detraccion_venta: z.boolean().optional(),
   pct_detraccion_venta:    z.number().int().min(0).max(100).optional(),
-  fase:                    z.enum(['cotizacion', 'aprobado', 'ejecucion', 'finalizado']).optional(),
+  fase:                    z.enum(['cotizacion', 'ejecucion', 'finalizado']).optional(),
   subtotal_manual:         z.boolean().optional(),
   descuento_tipo:          z.enum(['pct', 'fijo']).optional(),
   descuento_valor:         z.number().int().min(0).optional(),
