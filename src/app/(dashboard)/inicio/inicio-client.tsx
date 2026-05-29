@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -18,27 +18,47 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn, formatMoney } from '@/lib/utils'
 import type {
-  ChartDataPoint, KpiData, ProyectoRentabilidad, DistribucionItem,
-  AlertaItem, SaludData, ClienteOpt, ProveedorOpt, ProyectoOpt,
+  AlertaItem, ClienteOpt, ProveedorOpt, ProyectoOpt,
+  RawMovR, RawMovP, RawProyecto, RawItem, RawGasto,
+  ChartDataPoint, KpiData, ProyectoRentabilidad, DistribucionItem, SaludData,
 } from './page'
+import { TIPO_CFG } from './page'
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Filter types ──────────────────────────────────────────────────────────────
+
+export type DashboardFilters = {
+  periodo: 'mes' | 'mes_anterior' | '3m' | '6m' | 'año' | 'custom'
+  fechaInicio?: Date
+  fechaFin?: Date
+  clienteId?: string
+  tipo?: string
+  estado?: string
+}
+
+const DEFAULT_FILTERS: DashboardFilters = { periodo: '6m', estado: 'activo' }
+const LS_KEY = 'kivo_dashboard_filters'
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   saludo: string
   nombre: string
-  chartData: ChartDataPoint[]
-  kpis: KpiData
-  rentabilidad: ProyectoRentabilidad[]
-  distribucion: DistribucionItem[]
   alertas: AlertaItem[]
-  salud: SaludData
   clientes: ClienteOpt[]
   proveedores: ProveedorOpt[]
   proyectosOpts: ProyectoOpt[]
+  // Raw arrays for client-side filter computation:
+  proyectosRaw: RawProyecto[]
+  itemsRaw: RawItem[]
+  movRealizadosRaw: RawMovR[]
+  movPendientesRaw: RawMovP[]
+  gastosChartRaw: RawGasto[]
+  limaYear: number
+  limaMonth: number  // 0-indexed
+  todayStr: string
 }
 
-// ── Constants ──────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const ESTADO_CFG: Record<string, { label: string; cls: string }> = {
   activo:   { label: 'En progreso', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -52,6 +72,485 @@ const NIVEL_CFG: Record<'critico' | 'advertencia' | 'informativo', {
   critico:     { leftBorder: 'border-l-red-500',   bg: 'bg-red-50',   titleCls: 'text-red-700'   },
   advertencia: { leftBorder: 'border-l-amber-500', bg: 'bg-amber-50', titleCls: 'text-amber-700' },
   informativo: { leftBorder: 'border-l-blue-500',  bg: 'bg-blue-50',  titleCls: 'text-blue-700'  },
+}
+
+const PERIODO_LABEL: Record<DashboardFilters['periodo'], string> = {
+  mes:          'Este mes',
+  mes_anterior: 'Mes anterior',
+  '3m':         'Últimos 3 meses',
+  '6m':         'Últimos 6 meses',
+  año:          'Este año',
+  custom:       'Personalizado',
+}
+
+const CHART_SUBTITLE: Record<DashboardFilters['periodo'], string> = {
+  mes:          'Ingresos y gastos del mes actual por día',
+  mes_anterior: 'Ingresos y gastos del mes anterior por día',
+  '3m':         'Comparativa semanal — últimos 3 meses',
+  '6m':         'Comparativa semestral de desempeño financiero',
+  año:          'Comparativa anual de desempeño financiero',
+  custom:       'Período personalizado',
+}
+
+// ── Period bounds ─────────────────────────────────────────────────────────────
+
+type Granularity = 'day' | 'week' | 'month'
+
+function computePeriodBounds(
+  filters: DashboardFilters,
+  limaYear: number,
+  limaMonth: number,
+  todayStr: string,
+): { dateStart: string; dateEnd: string; granularity: Granularity } {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  switch (filters.periodo) {
+    case 'mes': {
+      const start = `${limaYear}-${pad(limaMonth + 1)}-01`
+      return { dateStart: start, dateEnd: todayStr, granularity: 'day' }
+    }
+    case 'mes_anterior': {
+      const d = new Date(Date.UTC(limaYear, limaMonth - 1, 1))
+      const y = d.getUTCFullYear(); const m = d.getUTCMonth()
+      const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate()
+      return {
+        dateStart: `${y}-${pad(m + 1)}-01`,
+        dateEnd:   `${y}-${pad(m + 1)}-${pad(lastDay)}`,
+        granularity: 'day',
+      }
+    }
+    case '3m':
+      return {
+        dateStart: new Date(Date.UTC(limaYear, limaMonth - 3, 1)).toISOString().split('T')[0],
+        dateEnd: todayStr,
+        granularity: 'week',
+      }
+    case '6m':
+      return {
+        dateStart: new Date(Date.UTC(limaYear, limaMonth - 6, 1)).toISOString().split('T')[0],
+        dateEnd: todayStr,
+        granularity: 'month',
+      }
+    case 'año':
+      return { dateStart: `${limaYear}-01-01`, dateEnd: todayStr, granularity: 'month' }
+    case 'custom': {
+      const start = filters.fechaInicio
+        ? filters.fechaInicio.toISOString().split('T')[0]
+        : new Date(Date.UTC(limaYear, limaMonth - 6, 1)).toISOString().split('T')[0]
+      const end = filters.fechaFin
+        ? filters.fechaFin.toISOString().split('T')[0]
+        : todayStr
+      const days = (new Date(end).getTime() - new Date(start).getTime()) / 86400000
+      const granularity: Granularity = days <= 62 ? 'day' : days <= 120 ? 'week' : 'month'
+      return { dateStart: start, dateEnd: end, granularity }
+    }
+  }
+}
+
+// ── Chart data computation ────────────────────────────────────────────────────
+
+interface Bucket {
+  label: string
+  ingresos: number; gastos: number
+  altIngresos: number; altGastos: number
+  match: (d: string) => boolean
+}
+
+function buildBuckets(dateStart: string, dateEnd: string, granularity: Granularity): Bucket[] {
+  const buckets: Bucket[] = []
+  if (granularity === 'day') {
+    let cur = new Date(dateStart + 'T00:00:00Z')
+    const end = new Date(dateEnd + 'T00:00:00Z')
+    while (cur <= end) {
+      const key = cur.toISOString().split('T')[0]
+      buckets.push({ label: String(cur.getUTCDate()), ingresos: 0, gastos: 0, altIngresos: 0, altGastos: 0, match: d => d.substring(0, 10) === key })
+      cur = new Date(cur.getTime() + 86400000)
+    }
+  } else if (granularity === 'week') {
+    let cur = new Date(dateStart + 'T00:00:00Z')
+    const end = new Date(dateEnd + 'T00:00:00Z')
+    let n = 1
+    while (cur <= end) {
+      const ws = cur.toISOString().split('T')[0]
+      const we = new Date(Math.min(cur.getTime() + 6 * 86400000, end.getTime())).toISOString().split('T')[0]
+      const weekLabel = `Sem ${n++}`
+      buckets.push({ label: weekLabel, ingresos: 0, gastos: 0, altIngresos: 0, altGastos: 0, match: d => d >= ws && d <= we })
+      cur = new Date(cur.getTime() + 7 * 86400000)
+    }
+  } else {
+    // month
+    let cur = new Date(dateStart + 'T00:00:00Z')
+    const end = new Date(dateEnd + 'T00:00:00Z')
+    while (cur <= end) {
+      const y = cur.getUTCFullYear(); const m = cur.getUTCMonth()
+      const key = `${y}-${String(m + 1).padStart(2, '0')}`
+      const raw = cur.toLocaleString('es-PE', { month: 'short', timeZone: 'UTC' })
+      const label = raw.charAt(0).toUpperCase() + raw.slice(1, 3)
+      buckets.push({ label, ingresos: 0, gastos: 0, altIngresos: 0, altGastos: 0, match: d => d.substring(0, 7) === key })
+      cur = new Date(Date.UTC(y, m + 1, 1))
+    }
+  }
+  return buckets
+}
+
+function computeChartData(
+  movRealizados: RawMovR[],
+  gastosChart: RawGasto[],
+  proyectos: RawProyecto[],
+  itemsByProy: Record<string, { pv: number; gr: number }>,
+  dateStart: string,
+  dateEnd: string,
+  granularity: Granularity,
+): ChartDataPoint[] {
+  const buckets = buildBuckets(dateStart, dateEnd, granularity)
+  if (buckets.length === 0) return []
+
+  for (const mc of movRealizados) {
+    if (!mc.fecha_real || mc.fecha_real < dateStart || mc.fecha_real > dateEnd) continue
+    const b = buckets.find(b => b.match(mc.fecha_real!))
+    if (!b) continue
+    if (mc.tipo === 'ingreso') b.ingresos += mc.monto
+    else b.gastos += mc.monto
+  }
+
+  for (const g of gastosChart) {
+    if (!g.fecha_comprobante || g.fecha_comprobante < dateStart || g.fecha_comprobante > dateEnd) continue
+    const b = buckets.find(b => b.match(g.fecha_comprobante!))
+    if (b) b.altGastos += g.neto_a_pagar ?? 0
+  }
+
+  for (const p of proyectos) {
+    if (!p.fecha_inicio || p.fecha_inicio < dateStart || p.fecha_inicio > dateEnd) continue
+    const b = buckets.find(b => b.match(p.fecha_inicio!))
+    if (b) b.altIngresos += (itemsByProy[p.id] ?? { pv: 0 }).pv
+  }
+
+  const hasPrimary = buckets.some(b => b.ingresos > 0 || b.gastos > 0)
+  return buckets.map(b => ({
+    mes: b.label,
+    ingresos: hasPrimary ? b.ingresos : b.altIngresos,
+    gastos:   hasPrimary ? b.gastos   : b.altGastos,
+  }))
+}
+
+// ── KPI computation ───────────────────────────────────────────────────────────
+
+function computeKpis(
+  movRealizados: RawMovR[],
+  movPendientes: RawMovP[],
+  dateStart: string,
+  dateEnd: string,
+  todayStr: string,
+  limaYear: number,
+  limaMonth: number,
+): KpiData {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const currentMonthKey = `${limaYear}-${pad(limaMonth + 1)}`
+  const prevD = new Date(Date.UTC(limaYear, limaMonth - 1, 1))
+  const prevMonthKey = `${prevD.getUTCFullYear()}-${pad(prevD.getUTCMonth() + 1)}`
+  const thirtyDaysLater = new Date(new Date(todayStr).getTime() + 30 * 86400000).toISOString().split('T')[0]
+
+  const pendingIngresos = movPendientes.filter(m => m.tipo === 'ingreso')
+  const pendingEgresos  = movPendientes.filter(m => m.tipo === 'egreso')
+
+  const porCobrar      = pendingIngresos.reduce((s, m) => s + m.monto, 0)
+  const porCobrarCount = pendingIngresos.length
+  const porPagar       = pendingEgresos.reduce((s, m) => s + m.monto, 0)
+  const porPagarCount  = pendingEgresos.length
+
+  // flujoNeto: realized movements within the selected period
+  const periodRealized = movRealizados.filter(
+    m => m.fecha_real && m.fecha_real >= dateStart && m.fecha_real <= dateEnd
+  )
+  const flujoNeto = periodRealized.reduce(
+    (s, m) => s + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0
+  )
+
+  const flujoProyectado = pendingIngresos
+    .filter(m => m.fecha_esperada && m.fecha_esperada >= todayStr && m.fecha_esperada <= thirtyDaysLater)
+    .reduce((s, m) => s + m.monto, 0)
+
+  // metaMensualPct: projected vs avg of last 3 months ingresos (current month buckets in realized)
+  const last3Months = [-2, -1, 0].map(off => {
+    const d = new Date(Date.UTC(limaYear, limaMonth + off, 1))
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`
+  })
+  const last3AvgIngresos = last3Months.reduce((sum, mk) => {
+    return sum + movRealizados.filter(m => m.tipo === 'ingreso' && m.fecha_real?.startsWith(mk)).reduce((s, m) => s + m.monto, 0)
+  }, 0) / 3
+  const metaMensualPct = last3AvgIngresos > 0 ? Math.round((flujoProyectado / last3AvgIngresos) * 100) : 0
+
+  const porCobrarCurrentMonth = pendingIngresos.filter(m => m.fecha_esperada?.startsWith(currentMonthKey)).reduce((s, m) => s + m.monto, 0)
+  const porCobrarPrevMonth    = pendingIngresos.filter(m => m.fecha_esperada?.startsWith(prevMonthKey)).reduce((s, m) => s + m.monto, 0)
+  const varPorCobrarPct: number | null = porCobrarPrevMonth > 0
+    ? Math.round(((porCobrarCurrentMonth - porCobrarPrevMonth) / porCobrarPrevMonth) * 100)
+    : null
+
+  const prevMonthEgresos = movRealizados.filter(m => m.tipo === 'egreso' && m.fecha_real?.startsWith(prevMonthKey)).reduce((s, m) => s + m.monto, 0)
+  const curMonthEgresos  = movRealizados.filter(m => m.tipo === 'egreso' && m.fecha_real?.startsWith(currentMonthKey)).reduce((s, m) => s + m.monto, 0)
+  const reduccionGastosPct: number | null = prevMonthEgresos > 0
+    ? Math.round(((prevMonthEgresos - curMonthEgresos) / prevMonthEgresos) * 100)
+    : null
+
+  return {
+    porCobrar, porCobrarCount, porPagar, porPagarCount,
+    flujoNeto, flujoProyectado, metaMensualPct,
+    reduccionGastosPct, varPorCobrarPct,
+  }
+}
+
+// ── Rentabilidad + Distribución computation ───────────────────────────────────
+
+function computeRentabilidad(
+  proyectos: RawProyecto[],
+  itemsByProy: Record<string, { pv: number; gr: number }>,
+  estado: string | undefined,
+): ProyectoRentabilidad[] {
+  const estadoFilter = estado && estado !== 'todos' ? estado : null
+  return proyectos
+    .filter(p => estadoFilter ? p.estado === estadoFilter : p.estado !== 'cerrado')
+    .map(p => {
+      const it = itemsByProy[p.id] ?? { pv: 0, gr: 0 }
+      const margen_pct = it.pv > 0 ? ((it.pv - it.gr) / it.pv) * 100 : 0
+      return { id: p.id, nombre: p.nombre, tipo: p.tipo, estado: p.estado, cliente: p.cliente, ingresos: it.pv, gasto_real: it.gr, margen_pct }
+    })
+    .sort((a, b) => b.margen_pct - a.margen_pct)
+    .slice(0, 5)
+}
+
+function computeDistribucion(
+  proyectos: RawProyecto[],
+  itemsByProy: Record<string, { pv: number; gr: number }>,
+): DistribucionItem[] {
+  const map: Record<string, number> = {}
+  proyectos.filter(p => p.estado === 'activo').forEach(p => {
+    const pv = (itemsByProy[p.id] ?? { pv: 0 }).pv
+    if (pv > 0) map[p.tipo] = (map[p.tipo] ?? 0) + pv
+  })
+  const total = Object.values(map).reduce((a, b) => a + b, 0)
+  return Object.entries(map)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 4)
+    .map(([tipo, monto]) => ({
+      tipo, monto,
+      pct:   total > 0 ? Math.round((monto / total) * 100) : 0,
+      label: TIPO_CFG[tipo]?.label ?? tipo,
+      color: TIPO_CFG[tipo]?.color ?? '#94a3b8',
+    }))
+}
+
+function computeSalud(
+  proyectos: RawProyecto[],
+  itemsByProy: Record<string, { pv: number; gr: number }>,
+  flujoNeto: number,
+  alertas: AlertaItem[],
+): SaludData {
+  const activeMargins = proyectos
+    .filter(p => p.estado === 'activo')
+    .flatMap(p => {
+      const it = itemsByProy[p.id] ?? { pv: 0, gr: 0 }
+      if (it.pv === 0) return []
+      return [((it.pv - it.gr) / it.pv) * 100]
+    })
+  const avgMargen = activeMargins.length > 0
+    ? activeMargins.reduce((a, b) => a + b, 0) / activeMargins.length
+    : 0
+  const proyectosEnRiesgo = activeMargins.filter(m => m < 15).length
+  const alertasCriticas   = alertas.filter(a => a.nivel === 'critico').length
+
+  let score = 0
+  if (avgMargen > 30)       score += 40
+  if (flujoNeto > 0)        score += 30
+  if (alertasCriticas === 0) score += 20
+  if (proyectosEnRiesgo === 0) score += 10
+
+  return {
+    score,
+    subtitle:
+      score >= 90 ? 'Tu empresa está en un estado óptimo de crecimiento este mes.'
+      : score >= 70 ? 'Buen desempeño general, hay oportunidades de mejora.'
+      : score >= 50 ? 'Atención requerida en algunos indicadores clave.'
+      : 'Se requiere acción inmediata en finanzas del negocio.',
+  }
+}
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+
+function loadFilters(): DashboardFilters {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return DEFAULT_FILTERS
+    const p = JSON.parse(raw) as Record<string, unknown>
+    return {
+      ...DEFAULT_FILTERS,
+      ...p,
+      fechaInicio: p.fechaInicio ? new Date(p.fechaInicio as string) : undefined,
+      fechaFin:    p.fechaFin    ? new Date(p.fechaFin    as string) : undefined,
+    }
+  } catch {
+    return DEFAULT_FILTERS
+  }
+}
+
+function saveFilters(f: DashboardFilters) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(f)) } catch {}
+}
+
+// ── Filter bar ────────────────────────────────────────────────────────────────
+
+const selectCls = 'h-8 rounded-md border border-zinc-200 bg-white pl-2.5 pr-6 text-xs text-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-900 appearance-none cursor-pointer'
+
+function FilterBar({
+  filters, onChange, clientes,
+}: {
+  filters: DashboardFilters
+  onChange: (f: DashboardFilters) => void
+  clientes: ClienteOpt[]
+}) {
+  const isDefault = (
+    filters.periodo === DEFAULT_FILTERS.periodo &&
+    !filters.clienteId &&
+    !filters.tipo &&
+    (filters.estado === DEFAULT_FILTERS.estado || !filters.estado)
+  )
+
+  const set = (patch: Partial<DashboardFilters>) => onChange({ ...filters, ...patch })
+
+  // Active filter pills (non-default)
+  const pills: { key: string; label: string; clear: () => void }[] = []
+  if (filters.periodo !== DEFAULT_FILTERS.periodo) {
+    const label = filters.periodo === 'custom' && filters.fechaInicio && filters.fechaFin
+      ? `${filters.fechaInicio.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })} – ${filters.fechaFin.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}`
+      : PERIODO_LABEL[filters.periodo]
+    pills.push({ key: 'periodo', label, clear: () => set({ periodo: DEFAULT_FILTERS.periodo, fechaInicio: undefined, fechaFin: undefined }) })
+  }
+  if (filters.clienteId) {
+    const c = clientes.find(c => c.id === filters.clienteId)
+    pills.push({ key: 'cliente', label: c?.nombre ?? 'Cliente', clear: () => set({ clienteId: undefined }) })
+  }
+  if (filters.tipo) {
+    pills.push({ key: 'tipo', label: TIPO_CFG[filters.tipo]?.label ?? filters.tipo, clear: () => set({ tipo: undefined }) })
+  }
+  if (filters.estado && filters.estado !== DEFAULT_FILTERS.estado) {
+    const estadoMap: Record<string, string> = { en_pausa: 'En pausa', cerrado: 'Cerrados', todos: 'Todos' }
+    pills.push({ key: 'estado', label: estadoMap[filters.estado] ?? filters.estado, clear: () => set({ estado: DEFAULT_FILTERS.estado }) })
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Period */}
+        <div className="relative">
+          <select
+            value={filters.periodo}
+            onChange={e => set({ periodo: e.target.value as DashboardFilters['periodo'], fechaInicio: undefined, fechaFin: undefined })}
+            className={selectCls}
+          >
+            <option value="mes">Este mes</option>
+            <option value="mes_anterior">Mes anterior</option>
+            <option value="3m">Últimos 3 meses</option>
+            <option value="6m">Últimos 6 meses</option>
+            <option value="año">Este año</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-400 text-[10px]">▾</span>
+        </div>
+
+        {/* Custom date range */}
+        {filters.periodo === 'custom' && (
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              className="h-8 w-36 text-xs"
+              value={filters.fechaInicio ? filters.fechaInicio.toISOString().split('T')[0] : ''}
+              onChange={e => set({ fechaInicio: e.target.value ? new Date(e.target.value + 'T00:00:00') : undefined })}
+            />
+            <span className="text-zinc-400 text-xs">—</span>
+            <Input
+              type="date"
+              className="h-8 w-36 text-xs"
+              value={filters.fechaFin ? filters.fechaFin.toISOString().split('T')[0] : ''}
+              onChange={e => set({ fechaFin: e.target.value ? new Date(e.target.value + 'T00:00:00') : undefined })}
+            />
+          </div>
+        )}
+
+        <div className="h-4 w-px bg-zinc-200 mx-0.5" />
+
+        {/* Cliente */}
+        <div className="relative">
+          <select
+            value={filters.clienteId ?? ''}
+            onChange={e => set({ clienteId: e.target.value || undefined })}
+            className={selectCls}
+          >
+            <option value="">Todos los clientes</option>
+            {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+          <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-400 text-[10px]">▾</span>
+        </div>
+
+        {/* Tipo */}
+        <div className="relative">
+          <select
+            value={filters.tipo ?? ''}
+            onChange={e => set({ tipo: e.target.value || undefined })}
+            className={selectCls}
+          >
+            <option value="">Todos los tipos</option>
+            <option value="digital">Digital</option>
+            <option value="instalacion">Instalación</option>
+            <option value="evento">Evento</option>
+            <option value="offline">Offline</option>
+            <option value="otro">Otro</option>
+          </select>
+          <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-400 text-[10px]">▾</span>
+        </div>
+
+        {/* Estado */}
+        <div className="relative">
+          <select
+            value={filters.estado ?? 'activo'}
+            onChange={e => set({ estado: e.target.value })}
+            className={selectCls}
+          >
+            <option value="activo">Activos</option>
+            <option value="en_pausa">En pausa</option>
+            <option value="cerrado">Cerrados</option>
+            <option value="todos">Todos</option>
+          </select>
+          <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-400 text-[10px]">▾</span>
+        </div>
+
+        {/* Clear */}
+        {!isDefault && (
+          <button
+            onClick={() => onChange(DEFAULT_FILTERS)}
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-700 transition-colors ml-1"
+          >
+            <X size={12} /> Limpiar
+          </button>
+        )}
+      </div>
+
+      {/* Active pills */}
+      {pills.length > 0 && (
+        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+          <span className="text-[11px] text-zinc-400">Filtrando:</span>
+          {pills.map(pill => (
+            <span
+              key={pill.key}
+              className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[11px] font-medium text-blue-700"
+            >
+              {pill.label}
+              <button onClick={pill.clear} className="hover:text-blue-900">
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── KPI Card ──────────────────────────────────────────────────────────────────
@@ -86,7 +585,7 @@ function KpiCard({ title, value, sub, varPct, varPositiveIsBad = false, valueCol
 
 // ── Bar Chart ─────────────────────────────────────────────────────────────────
 
-function IngresosGastosChart({ data }: { data: ChartDataPoint[] }) {
+function IngresosGastosChart({ data, periodo }: { data: ChartDataPoint[]; periodo: DashboardFilters['periodo'] }) {
   const hasData = data.some(d => d.ingresos > 0 || d.gastos > 0)
 
   const fmtY = (v: number) => {
@@ -95,12 +594,14 @@ function IngresosGastosChart({ data }: { data: ChartDataPoint[] }) {
     return s > 0 ? `S/ ${s.toFixed(0)}` : '0'
   }
 
+  const xAxisInterval = data.length > 20 ? 4 : data.length > 13 ? 1 : 0
+
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-5">
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-900">Ingresos vs Gastos por mes</h2>
-          <p className="text-xs text-zinc-400 mt-0.5">Comparativa semestral de desempeño financiero</p>
+          <h2 className="text-sm font-semibold text-zinc-900">Ingresos vs Gastos</h2>
+          <p className="text-xs text-zinc-400 mt-0.5">{CHART_SUBTITLE[periodo]}</p>
         </div>
         <div className="flex items-center gap-4 text-xs text-zinc-500 shrink-0">
           <span className="flex items-center gap-1.5">
@@ -121,6 +622,7 @@ function IngresosGastosChart({ data }: { data: ChartDataPoint[] }) {
               axisLine={false}
               tickLine={false}
               tick={{ fontSize: 11, fill: '#94a3b8' }}
+              interval={xAxisInterval}
             />
             <YAxis
               axisLine={false}
@@ -235,7 +737,7 @@ function ProfitabilityTable({ data }: { data: ProyectoRentabilidad[] }) {
         </Link>
       </div>
       {data.length === 0 ? (
-        <div className="px-5 py-8 text-center text-sm text-zinc-400">Sin proyectos activos</div>
+        <div className="px-5 py-8 text-center text-sm text-zinc-400">Sin datos para los filtros seleccionados</div>
       ) : (
         <table className="w-full text-sm">
           <thead>
@@ -271,10 +773,7 @@ function ProfitabilityTable({ data }: { data: ProyectoRentabilidad[] }) {
                       <div className="flex-1 bg-zinc-100 rounded-full h-1.5 min-w-[50px]">
                         <div
                           className="h-1.5 rounded-full transition-all"
-                          style={{
-                            width: `${Math.min(Math.max(p.margen_pct, 0), 100)}%`,
-                            background: barColor,
-                          }}
+                          style={{ width: `${Math.min(Math.max(p.margen_pct, 0), 100)}%`, background: barColor }}
                         />
                       </div>
                       <span className="text-xs font-bold tabular-nums w-10 text-right" style={{ color: barColor }}>
@@ -343,18 +842,13 @@ function AlertasCard({ alertasIniciales }: { alertasIniciales: AlertaItem[] }) {
                     <p className="text-[11px] text-zinc-400 mt-0.5">
                       {new Date(a.fecha_generada).toLocaleString('es-PE', {
                         timeZone: 'America/Lima',
-                        day: '2-digit',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
+                        day: '2-digit', month: 'short',
+                        hour: '2-digit', minute: '2-digit',
                       })}
                     </p>
                   )}
                 </div>
-                <button
-                  onClick={() => resolver(a.id)}
-                  className="text-zinc-300 hover:text-zinc-500 shrink-0 mt-0.5 transition-colors"
-                >
+                <button onClick={() => resolver(a.id)} className="text-zinc-300 hover:text-zinc-500 shrink-0 mt-0.5 transition-colors">
                   <X size={12} />
                 </button>
               </div>
@@ -371,19 +865,14 @@ function AlertasCard({ alertasIniciales }: { alertasIniciales: AlertaItem[] }) {
 function SaludCard({ data }: { data: SaludData }) {
   return (
     <div className="rounded-xl p-5 relative overflow-hidden" style={{ background: '#1e40af' }}>
-      {/* Decorative circles */}
       <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full bg-white/10" />
       <div className="absolute right-0 top-16 w-20 h-20 rounded-full bg-white/10" />
       <div className="absolute right-24 -bottom-6 w-14 h-14 rounded-full bg-white/10" />
-      {/* Stars */}
       <span className="absolute right-10 top-7 text-white/20 text-xl leading-none select-none">✦</span>
       <span className="absolute right-24 top-14 text-white/15 text-sm leading-none select-none">✦</span>
-
       <p className="relative text-xs font-medium text-white/70 mb-1">Salud Financiera</p>
       <p className="relative text-5xl font-bold text-white leading-none mb-2">{data.score}%</p>
-      <p className="relative text-xs text-white/70 leading-relaxed mb-4 max-w-[200px]">
-        {data.subtitle}
-      </p>
+      <p className="relative text-xs text-white/70 leading-relaxed mb-4 max-w-[200px]">{data.subtitle}</p>
       <Link
         href="/reportes"
         className="relative inline-flex items-center text-xs font-medium text-white border border-white/30 rounded-lg px-3 py-1.5 hover:bg-white/10 transition-colors"
@@ -421,13 +910,12 @@ function GastoSheet({ open, onClose, proyectos, proveedores }: {
 
   async function handleSave() {
     setError(null)
-    if (!form.proyecto_id)    return setError('Selecciona un proyecto')
-    if (!form.proveedor_id)   return setError('Selecciona un proveedor')
+    if (!form.proyecto_id)     return setError('Selecciona un proyecto')
+    if (!form.proveedor_id)    return setError('Selecciona un proveedor')
     if (!form.concepto.trim()) return setError('Ingresa el concepto del gasto')
     const totalSoles = parseFloat(form.montoStr || '0')
     if (totalSoles <= 0) return setError('Ingresa un monto válido')
 
-    // For facturas: user enters total with IGV → back-calculate subtotal
     const totalCentavos = Math.round(totalSoles * 100)
     const subtotal = form.tipo_comprobante === 'factura'
       ? Math.round(totalCentavos / 1.18)
@@ -477,11 +965,8 @@ function GastoSheet({ open, onClose, proyectos, proveedores }: {
           ) : (
             <div className="space-y-4">
               {error && (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {error}
-                </div>
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
               )}
-
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1">Proyecto *</label>
                 <select value={form.proyecto_id} onChange={e => setF('proyecto_id', e.target.value)}
@@ -490,7 +975,6 @@ function GastoSheet({ open, onClose, proyectos, proveedores }: {
                   {proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                 </select>
               </div>
-
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1">Proveedor *</label>
                 <select value={form.proveedor_id} onChange={e => setF('proveedor_id', e.target.value)}
@@ -501,24 +985,15 @@ function GastoSheet({ open, onClose, proyectos, proveedores }: {
                   ))}
                 </select>
               </div>
-
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1">Concepto *</label>
-                <Input
-                  value={form.concepto}
-                  onChange={e => setF('concepto', e.target.value)}
-                  placeholder="Descripción del gasto"
-                />
+                <Input value={form.concepto} onChange={e => setF('concepto', e.target.value)} placeholder="Descripción del gasto" />
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-zinc-700 mb-1">Tipo comprobante</label>
-                  <select
-                    value={form.tipo_comprobante}
-                    onChange={e => setF('tipo_comprobante', e.target.value as TipoComprobante)}
-                    className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
-                  >
+                  <select value={form.tipo_comprobante} onChange={e => setF('tipo_comprobante', e.target.value as TipoComprobante)}
+                    className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900">
                     <option value="factura">Factura</option>
                     <option value="boleta">Boleta</option>
                     <option value="rxh">RxH</option>
@@ -527,38 +1002,23 @@ function GastoSheet({ open, onClose, proyectos, proveedores }: {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-zinc-700 mb-1">{montoLabel}</label>
-                  <Input
-                    type="number" min="0" step="0.01"
-                    value={form.montoStr}
-                    onChange={e => setF('montoStr', e.target.value)}
-                    placeholder="0.00"
-                    className="tabular-nums"
-                  />
+                  <Input type="number" min="0" step="0.01" value={form.montoStr} onChange={e => setF('montoStr', e.target.value)} placeholder="0.00" className="tabular-nums" />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-zinc-700 mb-1">Fecha comprobante</label>
-                  <Input
-                    type="date"
-                    value={form.fecha_comprobante}
-                    onChange={e => setF('fecha_comprobante', e.target.value)}
-                  />
+                  <Input type="date" value={form.fecha_comprobante} onChange={e => setF('fecha_comprobante', e.target.value)} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-zinc-700 mb-1">Estado de pago</label>
-                  <select
-                    value={form.estado_pago}
-                    onChange={e => setF('estado_pago', e.target.value as EstadoPago)}
-                    className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
-                  >
+                  <select value={form.estado_pago} onChange={e => setF('estado_pago', e.target.value as EstadoPago)}
+                    className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900">
                     <option value="pendiente">Pendiente</option>
                     <option value="pagado">Pagado</option>
                   </select>
                 </div>
               </div>
-
               <Button onClick={handleSave} disabled={saving} className="w-full mt-2">
                 {saving ? 'Registrando…' : 'Registrar Gasto'}
               </Button>
@@ -579,8 +1039,7 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
   const todayStr = new Date().toISOString().split('T')[0]
   const emptyForm = {
     cliente_id: '', nombre: '', tipo: 'digital', estado: 'activo',
-    fecha_inicio: todayStr, fecha_cierre_est: '',
-    aplica_detraccion: false,
+    fecha_inicio: todayStr, fecha_cierre_est: '', aplica_detraccion: false,
   }
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -599,13 +1058,11 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        cliente_id:         form.cliente_id,
-        nombre:             form.nombre.trim(),
-        tipo:               form.tipo,
-        estado:             form.estado,
-        fecha_inicio:       form.fecha_inicio,
-        fecha_cierre_est:   form.fecha_cierre_est || undefined,
-        aplica_detraccion:  form.aplica_detraccion,
+        cliente_id: form.cliente_id, nombre: form.nombre.trim(),
+        tipo: form.tipo, estado: form.estado,
+        fecha_inicio: form.fecha_inicio,
+        fecha_cierre_est: form.fecha_cierre_est || undefined,
+        aplica_detraccion: form.aplica_detraccion,
       }),
     })
     setSaving(false)
@@ -614,8 +1071,7 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
       setError(j.error ?? 'Error al crear el proyecto')
     } else {
       const j = await r.json() as { id: string }
-      setForm(emptyForm)
-      onClose()
+      setForm(emptyForm); onClose()
       router.push(`/proyectos/${j.id}`)
     }
   }
@@ -623,14 +1079,11 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) { setError(null); onClose() } }}>
       <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
-          <DialogTitle>Nuevo Proyecto</DialogTitle>
-        </DialogHeader>
+        <DialogHeader><DialogTitle>Nuevo Proyecto</DialogTitle></DialogHeader>
         <div className="space-y-4 mt-2">
           {error && (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
-
           <div>
             <label className="block text-xs font-medium text-zinc-700 mb-1">Cliente *</label>
             <select value={form.cliente_id} onChange={e => setF('cliente_id', e.target.value)}
@@ -639,16 +1092,10 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
-
           <div>
             <label className="block text-xs font-medium text-zinc-700 mb-1">Nombre del proyecto *</label>
-            <Input
-              value={form.nombre}
-              onChange={e => setF('nombre', e.target.value)}
-              placeholder="Ej: Campaña Digital Q3"
-            />
+            <Input value={form.nombre} onChange={e => setF('nombre', e.target.value)} placeholder="Ej: Campaña Digital Q3" />
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1">Tipo</label>
@@ -670,7 +1117,6 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
               </select>
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1">Fecha de inicio *</label>
@@ -681,22 +1127,14 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
               <Input type="date" value={form.fecha_cierre_est} onChange={e => setF('fecha_cierre_est', e.target.value)} />
             </div>
           </div>
-
           <label className="flex items-center gap-2.5 cursor-pointer py-1">
-            <input
-              type="checkbox"
-              checked={form.aplica_detraccion}
-              onChange={e => setF('aplica_detraccion', e.target.checked)}
-              className="w-4 h-4 rounded border-zinc-300 accent-blue-600"
-            />
+            <input type="checkbox" checked={form.aplica_detraccion} onChange={e => setF('aplica_detraccion', e.target.checked)}
+              className="w-4 h-4 rounded border-zinc-300 accent-blue-600" />
             <span className="text-sm text-zinc-700">Aplica detracción</span>
           </label>
-
           <div className="flex justify-end gap-3 pt-2 border-t border-zinc-100">
             <Button variant="outline" onClick={() => { setError(null); onClose() }}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Creando…' : 'Crear Proyecto'}
-            </Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? 'Creando…' : 'Crear Proyecto'}</Button>
           </div>
         </div>
       </DialogContent>
@@ -707,15 +1145,84 @@ function NuevoProyectoDialog({ open, onClose, clientes }: {
 // ── Main Client Component ────────────────────────────────────────────────────
 
 export function InicioClient({
-  saludo, nombre, chartData, kpis, rentabilidad, distribucion,
-  alertas, salud, clientes, proveedores, proyectosOpts,
+  saludo, nombre, alertas, clientes, proveedores, proyectosOpts,
+  proyectosRaw, itemsRaw, movRealizadosRaw, movPendientesRaw, gastosChartRaw,
+  limaYear, limaMonth, todayStr,
 }: Props) {
-  const [gastoSheetOpen,    setGastoSheetOpen]    = useState(false)
+  const [gastoSheetOpen,     setGastoSheetOpen]     = useState(false)
   const [proyectoDialogOpen, setProyectoDialogOpen] = useState(false)
+  const [filters, setFilters] = useState<DashboardFilters>(DEFAULT_FILTERS)
+
+  // Load persisted filters after mount
+  useEffect(() => {
+    const saved = loadFilters()
+    setFilters(saved)
+  }, [])
+
+  function updateFilters(f: DashboardFilters) {
+    setFilters(f)
+    saveFilters(f)
+  }
+
+  // ── Derived data via useMemo ─────────────────────────────────────────────
+
+  const { dateStart, dateEnd, granularity } = useMemo(
+    () => computePeriodBounds(filters, limaYear, limaMonth, todayStr),
+    [filters, limaYear, limaMonth, todayStr],
+  )
+
+  const filteredProyectos = useMemo(() => {
+    return proyectosRaw.filter(p => {
+      if (filters.clienteId && p.cliente?.id !== filters.clienteId) return false
+      if (filters.tipo && p.tipo !== filters.tipo) return false
+      return true
+    })
+  }, [proyectosRaw, filters.clienteId, filters.tipo])
+
+  const itemsByProy = useMemo(() => {
+    return itemsRaw.reduce<Record<string, { pv: number; gr: number }>>((acc, it) => {
+      if (!acc[it.proyecto_id]) acc[it.proyecto_id] = { pv: 0, gr: 0 }
+      acc[it.proyecto_id].pv += it.precio_venta
+      acc[it.proyecto_id].gr += it.gasto_real
+      return acc
+    }, {})
+  }, [itemsRaw])
+
+  const chartData = useMemo(
+    () => computeChartData(movRealizadosRaw, gastosChartRaw, filteredProyectos, itemsByProy, dateStart, dateEnd, granularity),
+    [movRealizadosRaw, gastosChartRaw, filteredProyectos, itemsByProy, dateStart, dateEnd, granularity],
+  )
+
+  const kpis = useMemo(
+    () => computeKpis(movRealizadosRaw, movPendientesRaw, dateStart, dateEnd, todayStr, limaYear, limaMonth),
+    [movRealizadosRaw, movPendientesRaw, dateStart, dateEnd, todayStr, limaYear, limaMonth],
+  )
+
+  const rentabilidad = useMemo(
+    () => computeRentabilidad(filteredProyectos, itemsByProy, filters.estado),
+    [filteredProyectos, itemsByProy, filters.estado],
+  )
+
+  const distribucion = useMemo(
+    () => computeDistribucion(filteredProyectos, itemsByProy),
+    [filteredProyectos, itemsByProy],
+  )
+
+  const salud = useMemo(
+    () => computeSalud(proyectosRaw, itemsByProy, kpis.flujoNeto, alertas),
+    [proyectosRaw, itemsByProy, kpis.flujoNeto, alertas],
+  )
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  const flujoNetoColor =
+    kpis.flujoNeto > 0 ? '#2563eb'
+    : kpis.flujoNeto < 0 ? '#dc2626'
+    : '#71717a'
 
   return (
-    <div className="p-6 space-y-6 max-w-[1400px]">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+    <div className="p-6 space-y-5 max-w-[1400px]">
+      {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
@@ -735,7 +1242,10 @@ export function InicioClient({
         </div>
       </div>
 
-      {/* ── KPI Cards ──────────────────────────────────────────────────────── */}
+      {/* ── Filter bar ──────────────────────────────────────────────────── */}
+      <FilterBar filters={filters} onChange={updateFilters} clientes={clientes} />
+
+      {/* ── KPI Cards ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           title="Por cobrar"
@@ -757,25 +1267,22 @@ export function InicioClient({
               ? `${kpis.reduccionGastosPct > 0 ? 'Reducción' : 'Aumento'} en gastos: ${Math.abs(kpis.reduccionGastosPct)}%`
               : `${kpis.porPagarCount} pago${kpis.porPagarCount !== 1 ? 's' : ''} pendiente${kpis.porPagarCount !== 1 ? 's' : ''}`
           }
-          varPositiveIsBad={true}
+          varPositiveIsBad
         />
         <KpiCard
           title="Flujo neto real"
-          value={formatMoney(Math.abs(kpis.flujoNetoMes))}
+          value={formatMoney(Math.abs(kpis.flujoNeto))}
           sub="Liquidez disponible inmediata"
-          valueColor={kpis.flujoNetoMes >= 0 ? '#2563eb' : '#dc2626'}
+          valueColor={flujoNetoColor}
         />
       </div>
 
-      {/* ── Main 2-column layout ───────────────────────────────────────────── */}
+      {/* ── Main 2-column layout ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: chart + table */}
         <div className="lg:col-span-2 space-y-6">
-          <IngresosGastosChart data={chartData} />
+          <IngresosGastosChart data={chartData} periodo={filters.periodo} />
           <ProfitabilityTable data={rentabilidad} />
         </div>
-
-        {/* Right: donut + alerts + health */}
         <div className="space-y-4">
           <DistribucionChart data={distribucion} />
           <AlertasCard alertasIniciales={alertas} />
@@ -783,7 +1290,7 @@ export function InicioClient({
         </div>
       </div>
 
-      {/* ── Modals ─────────────────────────────────────────────────────────── */}
+      {/* ── Modals ──────────────────────────────────────────────────────── */}
       <GastoSheet
         open={gastoSheetOpen}
         onClose={() => setGastoSheetOpen(false)}
