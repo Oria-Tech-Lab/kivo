@@ -257,10 +257,10 @@ function ProfitabilityTable({ data }: { data: ProyectoRentabilidad[] }) {
                   className="hover:bg-zinc-50/60 transition-colors cursor-pointer"
                   onClick={() => router.push(`/proyectos/${p.id}`)}
                 >
-                  <td className="px-4 py-3">
-                    <p className="text-xs font-medium text-zinc-900 truncate max-w-[140px]">{p.nombre}</p>
+                  <td className="px-4 py-3 min-w-[200px]">
+                    <p className="text-xs font-medium text-zinc-900">{p.nombre}</p>
                   </td>
-                  <td className="px-3 py-3 text-xs text-zinc-500 truncate max-w-[100px]">
+                  <td className="px-3 py-3 text-xs text-zinc-500">
                     {p.cliente?.nombre ?? <span className="text-zinc-300">—</span>}
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums text-xs text-zinc-700">
