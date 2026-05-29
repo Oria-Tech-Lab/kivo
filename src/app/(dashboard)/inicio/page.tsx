@@ -305,11 +305,14 @@ export default async function InicioPage() {
     .sort((a, b) => (NIVEL_ORDER[a.nivel] ?? 3) - (NIVEL_ORDER[b.nivel] ?? 3))
 
   // ── Health score ─────────────────────────────────────────────────────────
+  // Only include projects that have at least one item with precio_venta > 0;
+  // projects without items are in an early stage and must not skew the average.
   const allActiveMargins = proyectos
     .filter(p => p.estado === 'activo')
-    .map(p => {
+    .flatMap(p => {
       const it = itemsByProy[p.id] ?? { pv: 0, gr: 0 }
-      return it.pv > 0 ? ((it.pv - it.gr) / it.pv) * 100 : 0
+      if (it.pv === 0) return []
+      return [((it.pv - it.gr) / it.pv) * 100]
     })
   const avgMargen = allActiveMargins.length > 0
     ? allActiveMargins.reduce((a, b) => a + b, 0) / allActiveMargins.length
