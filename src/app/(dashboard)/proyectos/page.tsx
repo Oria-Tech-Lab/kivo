@@ -13,9 +13,11 @@ export interface ProyectoConMetricas {
   nombre: string
   tipo: string
   estado: 'activo' | 'en_pausa' | 'cerrado'
+  fase: string
   fecha_inicio: string
   fecha_cierre_est: string | null
   created_at: string
+  responsable_id: string | null
   cliente: { id: string; nombre: string } | null
   precio_venta_total: number
   costo_estimado_total: number
@@ -39,7 +41,7 @@ export default async function ProyectosPage() {
   const [proyectosRes, itemsRes, facturasRes, alertasRes, clientesRes] = await Promise.all([
     supabase
       .from('proyectos')
-      .select('id, nombre, tipo, estado, fecha_inicio, fecha_cierre_est, created_at, cliente:clientes(id, nombre)')
+      .select('id, nombre, tipo, estado, fase, fecha_inicio, fecha_cierre_est, created_at, responsable_id, cliente:clientes(id, nombre)')
       .order('created_at', { ascending: false }),
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,9 +65,10 @@ export default async function ProyectosPage() {
       .order('nombre', { ascending: true }),
   ])
 
-  const proyectosRaw = (proyectosRes.data ?? []) as Array<{
+  const proyectosRaw = (proyectosRes.data ?? []) as unknown as Array<{
     id: string; nombre: string; tipo: string; estado: string
-    fecha_inicio: string; fecha_cierre_est: string | null; created_at: string
+    fase: string | null; fecha_inicio: string; fecha_cierre_est: string | null
+    created_at: string; responsable_id: string | null
     cliente: { id: string; nombre: string } | null
   }>
 
@@ -133,7 +136,9 @@ export default async function ProyectosPage() {
       nombre: p.nombre,
       tipo: p.tipo,
       estado: p.estado as 'activo' | 'en_pausa' | 'cerrado',
+      fase: p.fase ?? 'cotizacion',
       fecha_inicio: p.fecha_inicio,
+      responsable_id: p.responsable_id,
       fecha_cierre_est: p.fecha_cierre_est,
       created_at: p.created_at,
       cliente: p.cliente,

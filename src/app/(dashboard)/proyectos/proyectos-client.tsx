@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Search, LayoutGrid, Table2, AlertTriangle, ChevronRight,
-  MoreHorizontal, Plus, Pencil, Trash2, Activity, TrendingUp,
+  MoreHorizontal, Plus, Pencil, Trash2, Activity, TrendingUp, SlidersHorizontal,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -32,6 +32,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from '@/components/ui/popover'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { cn, formatMoney, formatDate } from '@/lib/utils'
@@ -59,6 +62,39 @@ const TIPOS_PROYECTO = [
   { value: 'instalacion',label: 'Instalación'},
   { value: 'otro',       label: 'Otro'       },
 ] as const
+
+// ─── Column visibility ─────────────────────────────────────────────────────────
+
+type ColKey =
+  | 'cliente' | 'estado' | 'gasto_real' | 'margen' | 'facturacion' | 'alertas'
+  | 'facturado' | 'fase' | 'responsable' | 'fecha_inicio' | 'fecha_cierre'
+
+const DEFAULT_VISIBLE_COLS: ColKey[] = ['cliente', 'estado', 'gasto_real', 'margen', 'facturacion', 'alertas']
+
+const COL_LABELS: Record<ColKey, string> = {
+  cliente:      'Cliente',
+  estado:       'Estado',
+  gasto_real:   'Total gastos',
+  margen:       'Margen S/',
+  facturacion:  'Facturación',
+  alertas:      'Alertas',
+  facturado:    'Facturado',
+  fase:         'Fase del proyecto',
+  responsable:  'Responsable',
+  fecha_inicio: 'Fecha inicio',
+  fecha_cierre: 'Cierre estimado',
+}
+
+const COL_ORDER: ColKey[] = [
+  'cliente', 'estado', 'fase', 'gasto_real', 'margen', 'facturado', 'facturacion',
+  'fecha_inicio', 'fecha_cierre', 'responsable', 'alertas',
+]
+
+const FASE_LABEL: Record<string, string> = {
+  cotizacion: 'Cotización',
+  ejecucion:  'En ejecución',
+  finalizado: 'Finalizado',
+}
 
 function margenStyle(pct: number): { color: string; bg: string } {
   if (pct >= 30) return { color: '#059669', bg: '#ecfdf5' }
@@ -529,6 +565,24 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
+  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
+    if (typeof window === 'undefined') return new Set(DEFAULT_VISIBLE_COLS)
+    try {
+      const stored = localStorage.getItem('kivo_projects_columns_v1')
+      if (stored) return new Set(JSON.parse(stored) as ColKey[])
+    } catch { /* ignore */ }
+    return new Set(DEFAULT_VISIBLE_COLS)
+  })
+  function toggleCol(col: ColKey) {
+    setVisibleCols(prev => {
+      const next = new Set(prev)
+      if (next.has(col)) next.delete(col); else next.add(col)
+      try { localStorage.setItem('kivo_projects_columns_v1', JSON.stringify(Array.from(next))) } catch { /* ignore */ }
+      return next
+    })
+  }
+  const show = (col: ColKey) => visibleCols.has(col)
+
   const featured = useMemo(
     () =>
       proyectos
@@ -651,8 +705,25 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
           </SelectContent>
         </Select>
 
-        {/* View toggle */}
-        <div className="ml-auto flex rounded-md border border-zinc-200 bg-white p-1 gap-0.5">
+        {/* Column selector + View toggle */}
+        <div className="ml-auto flex items-center gap-2">
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className="flex items-center gap-1.5 rounded border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 hover:border-zinc-300 transition-colors">
+              <SlidersHorizontal size={13} /> Columnas
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-52 p-2" align="end">
+            <p className="mb-2 px-1 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Columnas visibles</p>
+            {COL_ORDER.map(col => (
+              <label key={col} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm text-zinc-700 hover:bg-zinc-50">
+                <input type="checkbox" checked={show(col)} onChange={() => toggleCol(col)} className="h-3.5 w-3.5 accent-zinc-900" />
+                {COL_LABELS[col]}
+              </label>
+            ))}
+          </PopoverContent>
+        </Popover>
+        <div className="flex rounded-md border border-zinc-200 bg-white p-1 gap-0.5">
           <button
             onClick={() => setViewMode('table')}
             className={cn(
@@ -678,6 +749,7 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
             <LayoutGrid size={15} />
           </button>
         </div>
+        </div>{/* end column selector + view toggle wrapper */}
       </div>
 
       {deleteError && (
@@ -706,12 +778,17 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
             <thead>
               <tr className="border-b border-zinc-100 bg-zinc-50/60">
                 <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Proyecto</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 hidden md:table-cell">Cliente</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Estado</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500 hidden md:table-cell">Total gastos</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Margen S/</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 hidden md:table-cell">Facturación</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-zinc-500 hidden md:table-cell">Alertas</th>
+                {show('cliente')      && <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Cliente</th>}
+                {show('estado')       && <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Estado</th>}
+                {show('fase')         && <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Fase</th>}
+                {show('gasto_real')   && <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Total gastos</th>}
+                {show('margen')       && <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Margen S/</th>}
+                {show('facturado')    && <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Facturado</th>}
+                {show('facturacion')  && <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Facturación</th>}
+                {show('fecha_inicio') && <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Inicio</th>}
+                {show('fecha_cierre') && <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Cierre est.</th>}
+                {show('responsable')  && <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Responsable</th>}
+                {show('alertas')      && <th className="px-4 py-3 text-center text-xs font-medium text-zinc-500">Alertas</th>}
                 <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Acciones</th>
               </tr>
             </thead>
@@ -733,50 +810,93 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
                     </p>
                   </td>
 
-                  <td className="px-4 py-3 hidden md:table-cell text-sm text-zinc-600">
-                    {proyecto.cliente ? (
-                      <Link href={`/clientes/${proyecto.cliente.id}/editar`} className="hover:underline">
-                        {proyecto.cliente.nombre}
-                      </Link>
-                    ) : (
-                      <span className="text-zinc-400">—</span>
-                    )}
-                  </td>
+                  {show('cliente') && (
+                    <td className="px-4 py-3 text-sm text-zinc-600">
+                      {proyecto.cliente ? (
+                        <Link href={`/clientes/${proyecto.cliente.id}/editar`} className="hover:underline">
+                          {proyecto.cliente.nombre}
+                        </Link>
+                      ) : (
+                        <span className="text-zinc-400">—</span>
+                      )}
+                    </td>
+                  )}
 
-                  <td className="px-4 py-3">
-                    <Badge variant="outline" className={ESTADO_CONFIG[proyecto.estado]?.className ?? ''}>
-                      {ESTADO_CONFIG[proyecto.estado]?.label ?? proyecto.estado}
-                    </Badge>
-                  </td>
+                  {show('estado') && (
+                    <td className="px-4 py-3">
+                      <Badge variant="outline" className={ESTADO_CONFIG[proyecto.estado]?.className ?? ''}>
+                        {ESTADO_CONFIG[proyecto.estado]?.label ?? proyecto.estado}
+                      </Badge>
+                    </td>
+                  )}
 
-                  <td className="px-4 py-3 text-right tabular-nums text-sm hidden md:table-cell">
-                    {proyecto.gasto_real_total > 0
-                      ? <span className="text-zinc-700">{formatMoney(proyecto.gasto_real_total)}</span>
-                      : <span className="text-zinc-300">{formatMoney(0)}</span>
-                    }
-                  </td>
+                  {show('fase') && (
+                    <td className="px-4 py-3 text-sm text-zinc-600">
+                      {FASE_LABEL[proyecto.fase] ?? proyecto.fase}
+                    </td>
+                  )}
 
-                  <td className="px-4 py-3">
-                    <MargenCell
-                      pct={proyecto.margen_pct}
-                      montoS={proyecto.precio_venta_total - proyecto.gasto_real_total}
-                    />
-                  </td>
+                  {show('gasto_real') && (
+                    <td className="px-4 py-3 text-right tabular-nums text-sm">
+                      {proyecto.gasto_real_total > 0
+                        ? <span className="text-zinc-700">{formatMoney(proyecto.gasto_real_total)}</span>
+                        : <span className="text-zinc-300">{formatMoney(0)}</span>
+                      }
+                    </td>
+                  )}
 
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    <FacturacionBadge status={proyecto.facturacion_status} />
-                  </td>
+                  {show('margen') && (
+                    <td className="px-4 py-3">
+                      <MargenCell
+                        pct={proyecto.margen_pct}
+                        montoS={proyecto.precio_venta_total - proyecto.gasto_real_total}
+                      />
+                    </td>
+                  )}
 
-                  <td className="px-4 py-3 text-center hidden md:table-cell">
-                    {proyecto.alertas_count > 0 ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600">
-                        <AlertTriangle size={12} />
-                        {proyecto.alertas_count}
-                      </span>
-                    ) : (
-                      <span className="text-zinc-300">—</span>
-                    )}
-                  </td>
+                  {show('facturado') && (
+                    <td className="px-4 py-3 text-right tabular-nums text-sm text-zinc-700">
+                      {formatMoney(proyecto.facturado_total)}
+                    </td>
+                  )}
+
+                  {show('facturacion') && (
+                    <td className="px-4 py-3">
+                      <FacturacionBadge status={proyecto.facturacion_status} />
+                    </td>
+                  )}
+
+                  {show('fecha_inicio') && (
+                    <td className="px-4 py-3 text-sm text-zinc-600 tabular-nums">
+                      {formatDate(proyecto.fecha_inicio)}
+                    </td>
+                  )}
+
+                  {show('fecha_cierre') && (
+                    <td className="px-4 py-3 text-sm text-zinc-600 tabular-nums">
+                      {proyecto.fecha_cierre_est
+                        ? formatDate(proyecto.fecha_cierre_est)
+                        : <span className="text-zinc-300">—</span>
+                      }
+                    </td>
+                  )}
+
+                  {show('responsable') && (
+                    <td className="px-4 py-3 text-sm text-zinc-400">—</td>
+                  )}
+
+                  {show('alertas') && (
+                    <td className="px-4 py-3 text-center">
+                      {proyecto.alertas_count > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600">
+                          <AlertTriangle size={12} />
+                          {proyecto.alertas_count}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-300">—</span>
+                      )}
+                    </td>
+                  )}
 
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
