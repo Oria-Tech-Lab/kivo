@@ -89,13 +89,27 @@ function getItemStatus(item: ProyectoItem): ItemStatus {
   return 'ejecutado'
 }
 
-const STATUS_CONFIG: Record<ItemStatus, { label: string; badge: string; row: string; strikethrough: boolean }> = {
-  ejecutado:    { label: 'EJECUTADO',    badge: 'bg-emerald-500 text-white', row: '',           strikethrough: false },
-  sobregasto:   { label: 'SOBREGASTO',   badge: 'bg-red-500 text-white',     row: 'bg-red-50',  strikethrough: false },
-  ahorro:       { label: 'AHORRO',       badge: 'bg-blue-500 text-white',    row: 'bg-blue-50', strikethrough: false },
-  extra:        { label: 'EXTRA',        badge: 'bg-amber-500 text-white',   row: 'bg-amber-50',strikethrough: false },
-  no_ejecutado: { label: 'NO EJECUTADO', badge: 'bg-zinc-400 text-white',    row: 'opacity-60', strikethrough: true  },
-  vacio:        { label: '',             badge: '',                          row: '',           strikethrough: false },
+const STATUS_CONFIG: Record<ItemStatus, { row: string }> = {
+  ejecutado:    { row: ''            },
+  sobregasto:   { row: 'bg-red-50'  },
+  ahorro:       { row: 'bg-blue-50' },
+  extra:        { row: 'bg-amber-50'},
+  no_ejecutado: { row: ''           },
+  vacio:        { row: ''           },
+}
+
+type EstadoItem = 'presupuestado' | 'en_ejecucion' | 'ejecutado' | 'cancelado'
+const ESTADO_ITEM_OPTIONS: { value: EstadoItem; label: string }[] = [
+  { value: 'presupuestado', label: 'Presupuestado' },
+  { value: 'en_ejecucion',  label: 'En ejecución' },
+  { value: 'ejecutado',     label: 'Ejecutado' },
+  { value: 'cancelado',     label: 'Cancelado' },
+]
+const ESTADO_ITEM_CFG: Record<EstadoItem, { cls: string }> = {
+  presupuestado: { cls: 'bg-zinc-100 text-zinc-600' },
+  en_ejecucion:  { cls: 'bg-blue-50 text-blue-700 border border-blue-200' },
+  ejecutado:     { cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
+  cancelado:     { cls: 'bg-red-50 text-red-700 border border-red-200' },
 }
 
 // ─── Magic bytes check (client-side) ──────────────────────────────────────────
@@ -197,7 +211,7 @@ export function ProyectoDetailClient({
           case 'gasto_real':     return item.gasto_real
           case 'varianza':       return item.costo_estimado > 0 ? item.gasto_real - item.costo_estimado : -Infinity
           case 'precio_venta':   return item.precio_venta
-          case 'margen':         return item.precio_venta - item.gasto_real
+          case 'margen':         return item.precio_venta - item.costo_estimado
           case 'igv':            return item.tipo_comprobante === 'factura' ? Math.round(item.gasto_real * 0.18) : 0
           default: return 0
         }
@@ -222,7 +236,7 @@ export function ProyectoDetailClient({
       gasto_real:     acc.gasto_real     + item.gasto_real,
       precio_venta:   acc.precio_venta   + item.precio_venta,
       igv:            acc.igv            + igv,
-      margen:         acc.margen         + (item.precio_venta - item.gasto_real),
+      margen:         acc.margen         + (item.precio_venta - item.costo_estimado),
       varianza:       acc.varianza       + varianza,
     }
   }, { costo_estimado: 0, gasto_real: 0, precio_venta: 0, igv: 0, margen: 0, varianza: 0 })
@@ -316,6 +330,10 @@ export function ProyectoDetailClient({
       const gr = isNaN(n) ? 0 : solesToCentavos(n)
       fields.gasto_real = gr
       if (item.cantidad > 0) fields.precio_unitario = Math.round(gr / item.cantidad)
+      // Auto-advance estado based on gasto_real vs costo_estimado
+      if (item.estado !== 'cancelado' && item.costo_estimado > 0 && gr > 0) {
+        fields.estado = gr < item.costo_estimado ? 'en_ejecucion' : 'ejecutado'
+      }
     } else if (field === 'cantidad') {
       const n   = parseFloat(String(raw))
       const qty = isNaN(n) || n < 0 ? 0 : n
@@ -347,6 +365,7 @@ export function ProyectoDetailClient({
       precio_unitario: 0,
       tipo_comprobante: null,
       estado_pago: 'pendiente',
+      estado: 'presupuestado',
       fecha_pago: null,
       foto_url: null,
       factura_url: null,
@@ -756,13 +775,11 @@ export function ProyectoDetailClient({
                 {items.length > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-zinc-200" style={{ backgroundColor: '#f0f4ff' }}>
-                      <td className="px-4 py-3 text-xs font-bold text-zinc-600 uppercase tracking-wide">
-                        Totales {(show('cantidad') || show('unidad') || show('proveedor') || show('tipo_comp')) ? '' : ''}
-                      </td>
-                      {show('cantidad') && <td />}
-                      {show('unidad') && <td />}
-                      {show('proveedor') && <td />}
-                      {show('tipo_comp') && <td />}
+                      <td className="px-4 py-3 text-xs font-bold text-zinc-600 uppercase tracking-wide">Totales</td>
+                      {show('cantidad') && <td className="px-3 py-3" />}
+                      {show('unidad') && <td className="px-3 py-3" />}
+                      {show('proveedor') && <td className="px-3 py-3" />}
+                      {show('tipo_comp') && <td className="px-3 py-3" />}
                       <td className="px-3 py-3 text-right font-bold tabular-nums text-zinc-800 text-sm">
                         {totals.costo_estimado > 0 ? formatMoney(totals.costo_estimado) : '—'}
                       </td>
@@ -774,7 +791,7 @@ export function ProyectoDetailClient({
                           {totals.costo_estimado > 0 ? `${totals.varianza > 0 ? '+' : ''}${formatMoney(totals.varianza)}` : '—'}
                         </td>
                       )}
-                      <td />
+                      <td className="px-3 py-3" />
                       {show('precio_venta') && (
                         <td className="px-3 py-3 text-right font-bold tabular-nums text-zinc-800 text-sm">
                           {totals.precio_venta > 0 ? formatMoney(totals.precio_venta) : '—'}
@@ -782,7 +799,7 @@ export function ProyectoDetailClient({
                       )}
                       {show('margen') && (
                         <td className={cn('px-3 py-3 text-right font-bold tabular-nums text-sm', margenPct === null ? 'text-zinc-400' : totals.margen < 0 ? 'text-red-600' : 'text-emerald-700')}>
-                          {totals.precio_venta > 0 ? `${margenPct?.toFixed(0)}%` : '—'}
+                          {totals.precio_venta > 0 && totals.costo_estimado > 0 ? `${margenPct?.toFixed(0)}%` : '—'}
                         </td>
                       )}
                       {show('igv') && (
@@ -790,8 +807,8 @@ export function ProyectoDetailClient({
                           {totals.igv > 0 ? formatMoney(totals.igv) : '—'}
                         </td>
                       )}
-                      {show('estado_pago') && <td />}
-                      {canEdit && <td />}
+                      {show('estado_pago') && <td className="px-3 py-3" />}
+                      {canEdit && <td className="px-2 py-3" />}
                     </tr>
                     <tr style={{ backgroundColor: '#f0f4ff' }}>
                       <td colSpan={colCount} className="px-4 pb-3 text-xs text-zinc-400">
@@ -952,12 +969,13 @@ function ItemRow({
   const status    = getItemStatus(item)
   const cfg       = STATUS_CONFIG[status]
   const igv       = item.tipo_comprobante === 'factura' ? Math.round(item.gasto_real * 0.18) : 0
-  const margenAmt    = item.precio_venta - item.gasto_real
-  const margenRowPct = item.precio_venta > 0 ? (margenAmt / item.precio_venta) * 100 : null
+  const margenAmt    = item.precio_venta - item.costo_estimado
+  const margenRowPct = (item.precio_venta > 0 && item.costo_estimado > 0) ? (margenAmt / item.precio_venta) * 100 : null
   const varianza     = item.costo_estimado > 0 ? item.gasto_real - item.costo_estimado : 0
+  const isCancelado  = item.estado === 'cancelado'
 
   return (
-    <tr className={cn('group border-b border-zinc-100 transition-colors', cfg.row, isSaving && 'opacity-50', cfg.strikethrough && 'line-through text-zinc-400')}>
+    <tr className={cn('group border-b border-zinc-100 transition-colors', cfg.row, isSaving && 'opacity-50', isCancelado && 'line-through text-zinc-400 opacity-60')}>
 
       {/* Concepto */}
       <td className="px-4 py-2.5" onClick={() => onStartEdit(item.id, 'concepto')}>
@@ -1072,7 +1090,25 @@ function ItemRow({
 
       {/* Estado ítem */}
       <td className="px-3 py-2.5">
-        {cfg.label && <span className={cn('rounded px-2 py-0.5 text-[10px] font-bold tracking-wide', cfg.badge)}>{cfg.label}</span>}
+        {canEdit ? (
+          <select
+            value={item.estado ?? 'presupuestado'}
+            onChange={e => onSave(item.id, 'estado', e.target.value as EstadoItem)}
+            onClick={e => e.stopPropagation()}
+            className={cn(
+              'rounded px-2 py-0.5 text-[10px] font-medium cursor-pointer border-0 outline-none focus:ring-1 focus:ring-zinc-300',
+              ESTADO_ITEM_CFG[item.estado ?? 'presupuestado'].cls,
+            )}
+          >
+            {ESTADO_ITEM_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        ) : (
+          <span className={cn('rounded px-2 py-0.5 text-[10px] font-medium', ESTADO_ITEM_CFG[item.estado ?? 'presupuestado'].cls)}>
+            {ESTADO_ITEM_OPTIONS.find(o => o.value === (item.estado ?? 'presupuestado'))?.label}
+          </span>
+        )}
       </td>
 
       {/* P. Venta */}
@@ -1088,18 +1124,14 @@ function ItemRow({
         </td>
       )}
 
-      {/* Margen */}
+      {/* Margen = precio_venta − costo_estimado */}
       {show('margen') && (
         <td className="px-3 py-2.5 text-right">
-          {item.gasto_real === 0 && item.precio_venta === 0 ? (
+          {item.precio_venta === 0 || item.costo_estimado === 0 ? (
             <span className="text-sm text-zinc-300">—</span>
-          ) : margenRowPct !== null ? (
-            <span className={cn('text-sm tabular-nums font-medium', margenRowPct < 0 ? 'text-red-600' : 'text-emerald-700')}>
-              {margenRowPct.toFixed(0)}%
-            </span>
           ) : (
-            <span className={cn('text-sm tabular-nums font-medium', margenAmt < 0 ? 'text-red-600' : 'text-emerald-700')}>
-              {formatMoney(margenAmt)}
+            <span className={cn('text-sm tabular-nums font-medium', margenRowPct !== null && margenRowPct < 0 ? 'text-red-600' : margenAmt < 0 ? 'text-red-600' : 'text-emerald-700')}>
+              {margenRowPct !== null ? `${margenRowPct.toFixed(0)}%` : formatMoney(margenAmt)}
             </span>
           )}
         </td>

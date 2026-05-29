@@ -21,13 +21,14 @@ const itemSchema = z.object({
   factura_url:         z.string().nullable().optional(),
   constancia_pago_url: z.string().nullable().optional(),
   sort_order:          z.number().int().default(0),
+  estado:              z.enum(['presupuestado', 'en_ejecucion', 'ejecutado', 'cancelado']).default('presupuestado'),
 })
 
 const SELECT_FIELDS = `
   id, concepto, unidad, proveedor_id, costo_estimado, precio_venta,
   gasto_real, cantidad, precio_unitario, tipo_comprobante,
   estado_pago, fecha_pago, foto_url, factura_url, constancia_pago_url,
-  sort_order, created_at,
+  sort_order, created_at, estado,
   proveedor:proveedores(id, razon_social, nombre_comercial)
 `
 
@@ -93,6 +94,7 @@ export async function POST(req: Request, { params }: Params) {
       factura_url:         d.factura_url ?? null,
       constancia_pago_url: d.constancia_pago_url ?? null,
       sort_order:          d.sort_order,
+      estado:              d.estado,
     })
     .select(SELECT_FIELDS)
     .single()

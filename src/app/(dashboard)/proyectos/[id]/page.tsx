@@ -150,6 +150,7 @@ export interface ProyectoItem {
   constancia_pago_url: string | null
   sort_order: number
   created_at: string
+  estado: 'presupuestado' | 'en_ejecucion' | 'ejecutado' | 'cancelado'
   proveedor: { id: string; razon_social: string; nombre_comercial: string | null } | null
 }
 
