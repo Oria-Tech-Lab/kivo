@@ -43,6 +43,8 @@ export interface Cliente {
 
 export type TipoProyecto = "digital" | "offline" | "evento" | "instalacion" | "otro";
 export type EstadoProyecto = "activo" | "en_pausa" | "cerrado";
+export type FaseProyecto = "cotizacion" | "aprobado" | "ejecucion" | "finalizado";
+export type DescuentoTipo = "pct" | "fijo";
 
 export interface Proyecto {
   id: string;
@@ -57,6 +59,11 @@ export interface Proyecto {
   fecha_cierre_est: string | null;
   aplica_detraccion: boolean;
   notas: string | null;
+  // Migración 008
+  fase: FaseProyecto;
+  subtotal_manual: boolean;
+  descuento_tipo: DescuentoTipo;
+  descuento_valor: number;          // centavos si fijo, entero 0-100 si pct
   created_at: string;
   updated_at: string;
 }
