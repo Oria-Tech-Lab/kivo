@@ -116,9 +116,12 @@ export interface ProyectoData {
   cliente_id: string | null
   responsable_id: string | null
   subtotal_proyecto: number
+  subtotal_manual: boolean
   aplica_igv_venta: boolean
   aplica_detraccion_venta: boolean
   pct_detraccion_venta: number
+  descuento_tipo: 'pct' | 'fijo'
+  descuento_valor: number
   cliente: {
     id: string
     nombre: string

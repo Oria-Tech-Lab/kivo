@@ -20,6 +20,9 @@ const patchSchema = z.object({
   aplica_detraccion_venta: z.boolean().optional(),
   pct_detraccion_venta:    z.number().int().min(0).max(100).optional(),
   fase:                    z.enum(['cotizacion', 'aprobado', 'ejecucion', 'finalizado']).optional(),
+  subtotal_manual:         z.boolean().optional(),
+  descuento_tipo:          z.enum(['pct', 'fijo']).optional(),
+  descuento_valor:         z.number().int().min(0).optional(),
 })
 
 /**
@@ -42,7 +45,7 @@ export async function PATCH(request: Request, { params }: Params) {
     .update(parsed.data)
     .eq('id', params.id)
     .eq('org_id', auth.orgId)
-    .select('id, estado, notas, tipo, fecha_inicio, fecha_cierre_est, aplica_detraccion, cliente_id, responsable_id, subtotal_proyecto, aplica_igv_venta, aplica_detraccion_venta, pct_detraccion_venta, fase')
+    .select('id, estado, notas, tipo, fecha_inicio, fecha_cierre_est, aplica_detraccion, cliente_id, responsable_id, subtotal_proyecto, subtotal_manual, aplica_igv_venta, aplica_detraccion_venta, pct_detraccion_venta, fase, descuento_tipo, descuento_valor')
     .single()
 
   if (error || !proyecto) return apiError('Error actualizando proyecto', 500, error ?? undefined)

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {
   Tag, Check, ChevronDown, ChevronRight, Plus, Pencil,
   Trash2, X, AlertTriangle, RefreshCw, User, Upload, Paperclip,
+  Link2, Link2Off,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -687,7 +688,11 @@ export function ProyectoSidebar({
   const [notasSaved, setNotasSaved]   = useState(false)
   const [facturaSaved, setFacturaSaved] = useState(false)
   const [facturaDialog, setFacturaDialog] = useState<{ open: boolean; factura: FacturaProyecto | null }>({ open: false, factura: null })
+  const [descuentoOn, setDescuentoOn] = useState((proyecto.descuento_valor ?? 0) > 0)
+  const [descuentoTipo, setDescuentoTipo] = useState<'pct' | 'fijo'>((proyecto.descuento_tipo as 'pct' | 'fijo') ?? 'pct')
+  const [descuentoValorLocal, setDescuentoValorLocal] = useState(proyecto.descuento_valor ?? 0)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const descuentoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Load team members client-side
   useEffect(() => {
@@ -698,24 +703,32 @@ export function ProyectoSidebar({
   }, [])
 
   // Derived billing
-  const subtotalItems = items.reduce((s, i) => s + i.precio_venta, 0)
-  const totalGastos   = items.reduce((s, i) => s + i.gasto_real, 0)
-  const subtotal      = proyecto.subtotal_proyecto
-  const igvMonto      = proyecto.aplica_igv_venta ? Math.round(subtotal * 18 / 100) : 0
-  const totalConIGV   = subtotal + igvMonto
-  const detMonto      = proyecto.aplica_detraccion_venta ? Math.round(totalConIGV * proyecto.pct_detraccion_venta / 100) : 0
-  const totalNeto     = totalConIGV - detMonto
-  const margenNeto    = totalNeto - totalGastos
-  const margenPct     = totalNeto > 0 ? (margenNeto / totalNeto) * 100 : null
+  const subtotalItems    = items.reduce((s, i) => s + i.precio_venta, 0)
+  const totalGastos      = items.reduce((s, i) => s + i.gasto_real, 0)
 
-  const subtotalDifiere = subtotalItems > 0 && subtotalItems !== subtotal
+  // Smart subtotal: sync from items when subtotal_manual=false
+  const subtotalEfectivo = proyecto.subtotal_manual ? proyecto.subtotal_proyecto : subtotalItems
+
+  // Descuento
+  const descuentoMonto = descuentoOn
+    ? (descuentoTipo === 'pct'
+        ? Math.round(subtotalEfectivo * descuentoValorLocal / 100)
+        : descuentoValorLocal)
+    : 0
+  const baseImponible = subtotalEfectivo - descuentoMonto
+  const igvMonto      = proyecto.aplica_igv_venta ? Math.round(baseImponible * 18 / 100) : 0
+  const total         = baseImponible + igvMonto
+  const detMonto      = proyecto.aplica_detraccion_venta ? Math.round(total * proyecto.pct_detraccion_venta / 100) : 0
+  const clienteAbona  = total - detMonto
+  const margenNeto    = clienteAbona - totalGastos
+  const margenPct     = clienteAbona > 0 ? (margenNeto / clienteAbona) * 100 : null
 
   // Facturas resumen
   const totalFacturado    = facturas.reduce((s, f) => s + f.subtotal, 0)
   const totalIGVEmitido   = facturas.reduce((s, f) => s + f.igv, 0)
   const totalDetracciones = facturas.reduce((s, f) => s + f.monto_detraccion, 0)
   const totalAcobrar      = facturas.reduce((s, f) => s + f.cliente_abona, 0)
-  const diferencia        = subtotal - totalFacturado
+  const diferencia        = subtotalEfectivo - totalFacturado
 
   const hoy = new Date()
   const cierreVencido = proyecto.fecha_cierre_est && new Date(proyecto.fecha_cierre_est) < hoy && proyecto.estado !== 'cerrado'
@@ -760,7 +773,10 @@ export function ProyectoSidebar({
     debounceRef.current = setTimeout(() => saveNotas(value), 800)
   }
 
-  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (descuentoDebounceRef.current) clearTimeout(descuentoDebounceRef.current)
+  }, [])
 
   // ── Info inline save ────────────────────────────────────────────────────────
 
@@ -778,8 +794,43 @@ export function ProyectoSidebar({
     flash(setFacturaSaved)
   }
 
-  async function handleSyncSubtotal() {
-    await patchFacturacion({ subtotal_proyecto: subtotalItems })
+  async function handleSubtotalSave(newValue: number) {
+    onProyectoUpdate({ subtotal_proyecto: newValue, subtotal_manual: true })
+    await patch({ subtotal_proyecto: newValue, subtotal_manual: true })
+    flash(setFacturaSaved)
+  }
+
+  async function handleResync() {
+    onProyectoUpdate({ subtotal_proyecto: subtotalItems, subtotal_manual: false })
+    await patch({ subtotal_proyecto: subtotalItems, subtotal_manual: false })
+    flash(setFacturaSaved)
+  }
+
+  function saveDescuento(on: boolean, tipo: 'pct' | 'fijo', valor: number) {
+    if (descuentoDebounceRef.current) clearTimeout(descuentoDebounceRef.current)
+    descuentoDebounceRef.current = setTimeout(async () => {
+      await patch({ descuento_tipo: tipo, descuento_valor: on ? valor : 0 })
+      flash(setFacturaSaved)
+    }, 500)
+  }
+
+  function handleDescuentoToggle(on: boolean) {
+    setDescuentoOn(on)
+    saveDescuento(on, descuentoTipo, descuentoValorLocal)
+  }
+
+  function handleDescuentoTipo(tipo: 'pct' | 'fijo') {
+    setDescuentoTipo(tipo)
+    setDescuentoValorLocal(0)
+    saveDescuento(descuentoOn, tipo, 0)
+  }
+
+  function handleDescuentoValor(rawInput: string) {
+    const v = descuentoTipo === 'pct'
+      ? Math.min(100, Math.max(0, parseInt(rawInput, 10) || 0))
+      : solesToCentavos(parseFloat(rawInput) || 0)
+    setDescuentoValorLocal(v)
+    saveDescuento(descuentoOn, descuentoTipo, v)
   }
 
   // ── Facturas CRUD ────────────────────────────────────────────────────────────
@@ -947,82 +998,158 @@ export function ProyectoSidebar({
           <SavedBadge show={facturaSaved} />
         </div>
 
-        {/* Subtotal editable */}
-        <div className="mb-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-zinc-500">Subtotal proyecto</span>
-            {canEdit ? (
-              <InlineMoneyInput
-                value={subtotal}
-                onSave={v => patchFacturacion({ subtotal_proyecto: v })}
-              />
-            ) : (
-              <span className="text-sm font-bold tabular-nums font-mono text-zinc-900">
-                {subtotal > 0 ? formatMoney(subtotal) : '—'}
-              </span>
-            )}
+        {/* Subtotal con sincronización inteligente */}
+        <div className="mb-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Subtotal</span>
+            <div className="flex items-center gap-1.5">
+              {proyecto.subtotal_manual
+                ? <span title="Valor manual"><Link2Off size={11} className="text-amber-500 shrink-0" /></span>
+                : <span title="Sincronizado con ítems"><Link2 size={11} className="text-zinc-400 shrink-0" /></span>
+              }
+              {canEdit ? (
+                <InlineMoneyInput value={subtotalEfectivo} onSave={handleSubtotalSave} />
+              ) : (
+                <span className="text-sm font-bold tabular-nums font-mono text-zinc-900">
+                  {subtotalEfectivo > 0 ? formatMoney(subtotalEfectivo) : '—'}
+                </span>
+              )}
+            </div>
           </div>
-          {subtotalDifiere && canEdit && (
-            <button onClick={handleSyncSubtotal}
-              className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline">
-              <RefreshCw size={9} /> Sincronizar desde ítems ({formatMoney(subtotalItems)})
-            </button>
+          {proyecto.subtotal_manual && canEdit && (
+            <div className="flex justify-end mt-1">
+              <button onClick={handleResync}
+                className="flex items-center gap-1 text-[10px] text-amber-600 hover:text-amber-800 hover:underline">
+                <RefreshCw size={9} /> Re-sincronizar ({formatMoney(subtotalItems)})
+              </button>
+            </div>
           )}
         </div>
 
-        {/* IGV toggle */}
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs text-zinc-500">+ IGV (18%)</span>
-          <div className="flex items-center gap-2">
-            {proyecto.aplica_igv_venta && (
-              <span className="text-xs tabular-nums font-mono text-zinc-500">{formatMoney(igvMonto)}</span>
-            )}
-            {canEdit ? (
-              <Toggle checked={proyecto.aplica_igv_venta} onChange={v => patchFacturacion({ aplica_igv_venta: v })} />
-            ) : (
-              <span className="text-xs text-zinc-400">{proyecto.aplica_igv_venta ? 'Sí' : 'No'}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Detracción */}
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs text-zinc-500 shrink-0">− Detracción</span>
-          <div className="flex items-center gap-1.5">
-            {proyecto.aplica_detraccion_venta && (
-              <>
-                {canEdit ? (
-                  <select value={proyecto.pct_detraccion_venta}
-                    onChange={e => patchFacturacion({ pct_detraccion_venta: parseInt(e.target.value, 10) })}
-                    className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs outline-none focus:border-blue-400"
-                  >
-                    {PCT_DETRACCION_VENTA.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                ) : (
-                  <span className="text-xs text-zinc-500">{proyecto.pct_detraccion_venta}%</span>
-                )}
-                <span className="text-xs tabular-nums font-mono text-red-500">−{formatMoney(detMonto)}</span>
-              </>
-            )}
-            {canEdit ? (
-              <Toggle checked={proyecto.aplica_detraccion_venta} onChange={v => patchFacturacion({ aplica_detraccion_venta: v })} />
-            ) : (
-              <span className="text-xs text-zinc-400">{proyecto.aplica_detraccion_venta ? 'Sí' : 'No'}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Total neto */}
-        <div className="mt-3 pt-3 border-t border-[#e2e8f0]">
+        {/* Descuento */}
+        <div className="mb-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-zinc-600">Total a cobrar</span>
-            <span className="text-base font-bold tabular-nums font-mono text-zinc-900">
-              {totalNeto > 0 ? formatMoney(totalNeto) : '—'}
+            <span className="text-xs text-zinc-500">Descuento</span>
+            {canEdit
+              ? <Toggle checked={descuentoOn} onChange={handleDescuentoToggle} />
+              : <span className="text-xs text-zinc-400">{descuentoOn ? 'Sí' : 'No'}</span>
+            }
+          </div>
+          {descuentoOn && (
+            <div className="mt-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                {/* Tipo segmented control */}
+                <div className="flex rounded border border-zinc-200 overflow-hidden text-xs shrink-0">
+                  <button
+                    onClick={() => canEdit && handleDescuentoTipo('pct')}
+                    className={cn('px-2.5 py-1 transition-colors', descuentoTipo === 'pct' ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-500 hover:bg-zinc-50')}
+                  >%</button>
+                  <button
+                    onClick={() => canEdit && handleDescuentoTipo('fijo')}
+                    className={cn('px-2.5 py-1 transition-colors border-l border-zinc-200', descuentoTipo === 'fijo' ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-500 hover:bg-zinc-50')}
+                  >S/</button>
+                </div>
+                <input
+                  type="number"
+                  step={descuentoTipo === 'pct' ? '1' : '0.01'}
+                  min="0"
+                  max={descuentoTipo === 'pct' ? '100' : undefined}
+                  defaultValue={descuentoTipo === 'pct' ? descuentoValorLocal : centavosToSoles(descuentoValorLocal).toFixed(2)}
+                  key={`${descuentoTipo}`}
+                  onChange={e => handleDescuentoValor(e.target.value)}
+                  disabled={!canEdit}
+                  className="flex-1 min-w-0 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-right tabular-nums outline-none focus:border-blue-400 disabled:bg-zinc-50 disabled:text-zinc-400"
+                />
+              </div>
+              {descuentoMonto > 0 && (
+                <p className="text-[10px] text-right text-zinc-400 tabular-nums">
+                  {descuentoTipo === 'pct'
+                    ? `−${descuentoValorLocal}% = −${formatMoney(descuentoMonto)}`
+                    : `−${formatMoney(descuentoMonto)}`
+                  }
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Calculation breakdown */}
+        <div className="space-y-1.5 text-xs border-t border-zinc-100 pt-3">
+
+          {/* Descuento line */}
+          {descuentoOn && descuentoMonto > 0 && (
+            <div className="flex justify-between text-zinc-400">
+              <span>− Descuento</span>
+              <span className="tabular-nums font-mono">−{formatMoney(descuentoMonto)}</span>
+            </div>
+          )}
+
+          {/* Base imponible (only when descuento applies or IGV on) */}
+          {(descuentoOn && descuentoMonto > 0) && (
+            <div className="flex justify-between text-zinc-400 pb-1.5 border-b border-zinc-100">
+              <span className="italic">Base imponible</span>
+              <span className="tabular-nums font-mono">{formatMoney(baseImponible)}</span>
+            </div>
+          )}
+
+          {/* IGV toggle row */}
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-500">+ IGV (18%)</span>
+            <div className="flex items-center gap-2">
+              {proyecto.aplica_igv_venta && (
+                <span className="tabular-nums font-mono text-zinc-500">{formatMoney(igvMonto)}</span>
+              )}
+              {canEdit
+                ? <Toggle checked={proyecto.aplica_igv_venta} onChange={v => patchFacturacion({ aplica_igv_venta: v })} />
+                : <span className="text-zinc-400">{proyecto.aplica_igv_venta ? 'Sí' : 'No'}</span>
+              }
+            </div>
+          </div>
+
+          {/* Total */}
+          <div className="flex justify-between pt-1.5 border-t border-zinc-200 font-semibold text-zinc-800">
+            <span>Total</span>
+            <span className="tabular-nums font-mono">{total > 0 ? formatMoney(total) : '—'}</span>
+          </div>
+
+          {/* Detracción toggle row */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-zinc-500 shrink-0">− Detracción</span>
+            <div className="flex items-center gap-1.5">
+              {proyecto.aplica_detraccion_venta && (
+                <>
+                  {canEdit ? (
+                    <select value={proyecto.pct_detraccion_venta}
+                      onChange={e => patchFacturacion({ pct_detraccion_venta: parseInt(e.target.value, 10) })}
+                      className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs outline-none focus:border-blue-400"
+                    >
+                      {PCT_DETRACCION_VENTA.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  ) : (
+                    <span className="text-zinc-500">{proyecto.pct_detraccion_venta}%</span>
+                  )}
+                  <span className="tabular-nums font-mono text-red-500">−{formatMoney(detMonto)}</span>
+                </>
+              )}
+              {canEdit
+                ? <Toggle checked={proyecto.aplica_detraccion_venta} onChange={v => patchFacturacion({ aplica_detraccion_venta: v })} />
+                : <span className="text-zinc-400">{proyecto.aplica_detraccion_venta ? 'Sí' : 'No'}</span>
+              }
+            </div>
+          </div>
+
+          {/* Cliente abona */}
+          <div className="flex items-center justify-between pt-1.5 border-t border-zinc-200">
+            <span className="text-sm font-semibold text-zinc-700">Cliente abona</span>
+            <span className="text-lg font-bold tabular-nums font-mono text-emerald-700">
+              {clienteAbona > 0 ? formatMoney(clienteAbona) : '—'}
             </span>
           </div>
-          {(totalNeto > 0 || totalGastos > 0) && (
-            <div className="mt-2 flex items-center justify-between">
-              <span className="text-xs text-zinc-400">Margen neto</span>
+
+          {/* Margen neto */}
+          {(clienteAbona > 0 || totalGastos > 0) && (
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-400">Margen neto</span>
               <span className={cn(
                 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
                 margenPct === null ? 'bg-zinc-100 text-zinc-400'
@@ -1031,6 +1158,7 @@ export function ProyectoSidebar({
                 : 'bg-red-100 text-red-700',
               )}>
                 {margenPct !== null ? `${margenPct.toFixed(0)}%` : '—'}
+                {' · '}
                 <span className="font-mono font-normal opacity-75">
                   {margenNeto >= 0 ? '+' : ''}{formatMoney(margenNeto)}
                 </span>
@@ -1079,7 +1207,7 @@ export function ProyectoSidebar({
         )}
 
         {/* Alerta diferencia */}
-        {facturas.length > 0 && subtotal > 0 && (
+        {facturas.length > 0 && subtotalEfectivo > 0 && (
           <div className={cn(
             'mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-xs',
             diferencia === 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
