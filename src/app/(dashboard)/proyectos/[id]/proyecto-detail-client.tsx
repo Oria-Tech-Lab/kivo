@@ -112,6 +112,24 @@ const ESTADO_ITEM_CFG: Record<EstadoItem, { cls: string }> = {
   cancelado:     { cls: 'bg-red-50 text-red-700 border border-red-200' },
 }
 
+// ─── Fase de proyecto ─────────────────────────────────────────────────────────
+
+type FaseProyecto = 'cotizacion' | 'aprobado' | 'ejecucion' | 'finalizado'
+
+const FASES: { value: FaseProyecto; label: string }[] = [
+  { value: 'cotizacion', label: 'Cotización' },
+  { value: 'aprobado',   label: 'Aprobado' },
+  { value: 'ejecucion',  label: 'En ejecución' },
+  { value: 'finalizado', label: 'Finalizado' },
+]
+
+const FASE_DESCRIPTIONS: Record<FaseProyecto, string> = {
+  cotizacion: 'El proyecto vuelve a fase de cotización.',
+  aprobado:   'El cliente aprobó la propuesta. Los costos presupuestados quedarán como referencia.',
+  ejecucion:  'El proyecto entra en ejecución. Se habilitará el registro de gastos reales.',
+  finalizado: 'El proyecto se marcará como finalizado. La tabla quedará en solo lectura.',
+}
+
 // ─── Magic bytes check (client-side) ──────────────────────────────────────────
 
 const MAGIC_SIGS = [
@@ -167,6 +185,10 @@ export function ProyectoDetailClient({
     setKpiView(v)
     try { localStorage.setItem('kivo_project_kpi_view', v) } catch { /* ignore */ }
   }
+
+  const [fase, setFase]           = useState<FaseProyecto>((proyecto.fase as FaseProyecto) ?? 'cotizacion')
+  const [faseTarget, setFaseTarget] = useState<FaseProyecto | null>(null)
+  const [savingFase, setSavingFase] = useState(false)
 
   const [selectedIds, setSelectedIds]         = useState<Set<string>>(new Set())
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false)
@@ -257,6 +279,29 @@ export function ProyectoDetailClient({
     }
   }
 
+  async function saveFase(newFase: FaseProyecto) {
+    setSavingFase(true)
+    const prevFase = fase
+    setFase(newFase)
+    setFaseTarget(null)
+    try {
+      const res = await fetch(`/api/proyectos/${proyecto.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fase: newFase }),
+      })
+      if (!res.ok) {
+        setFase(prevFase)
+        showError('Error al cambiar la fase del proyecto')
+      }
+    } catch {
+      setFase(prevFase)
+      showError('Error de red al cambiar la fase')
+    } finally {
+      setSavingFase(false)
+    }
+  }
+
   // Sort state
   const [sortState, setSortState] = useState<{ col: SortableCol; dir: SortDir } | null>(null)
 
@@ -283,6 +328,9 @@ export function ProyectoDetailClient({
 
   const canEdit   = rol === 'admin' || rol === 'pm'
   const canDelete = rol === 'admin'
+  // fase-based editing rules
+  const canEditRow  = canEdit && fase !== 'finalizado'
+  const realDisabled = fase === 'cotizacion' || fase === 'aprobado'
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
@@ -533,11 +581,11 @@ export function ProyectoDetailClient({
 
   // Total columns including fixed ones
   const colCount = 4 /* concepto+presupuestado+real+estado */ +
-    (canEdit ? 1 : 0) /* checkbox */ +
+    (canEditRow ? 1 : 0) /* checkbox */ +
     (show('cantidad') ? 1 : 0) + (show('unidad') ? 1 : 0) + (show('proveedor') ? 1 : 0) +
     (show('tipo_comp') ? 1 : 0) + (show('varianza') ? 1 : 0) + (show('precio_venta') ? 1 : 0) +
     (show('margen') ? 1 : 0) + (show('igv') ? 1 : 0) + (show('estado_pago') ? 1 : 0) +
-    (canEdit ? 1 : 0) /* actions */
+    (canEditRow ? 1 : 0) /* actions */
 
   // ── KPI cards ────────────────────────────────────────────────────────────────
 
@@ -687,6 +735,24 @@ export function ProyectoDetailClient({
         </DialogContent>
       </Dialog>
 
+      {/* Fase change confirmation */}
+      <Dialog open={!!faseTarget} onOpenChange={open => { if (!open) setFaseTarget(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cambiar fase a {FASES.find(f => f.value === faseTarget)?.label}</DialogTitle>
+            <DialogDescription className="text-zinc-500 text-sm mt-1">
+              {faseTarget ? FASE_DESCRIPTIONS[faseTarget] : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setFaseTarget(null)}>Cancelar</Button>
+            <Button size="sm" onClick={() => faseTarget && saveFase(faseTarget)} disabled={savingFase}>
+              {savingFase ? 'Guardando…' : 'Confirmar'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Bulk delete confirmation */}
       <Dialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
         <DialogContent className="max-w-sm">
@@ -760,6 +826,9 @@ export function ProyectoDetailClient({
             </div>
           </div>
 
+          {/* Fase stepper */}
+          <FaseStepper fase={fase} onStepClick={f => { if (canEdit && f !== fase) setFaseTarget(f) }} />
+
           {/* Tabs */}
           <Tabs defaultValue="resumen">
             <TabsList>
@@ -794,7 +863,7 @@ export function ProyectoDetailClient({
                     <X size={11} /> Quitar filtro
                   </button>
                 )}
-                {canEdit && (
+                {canEditRow && (
                   <>
                     <Button size="sm" onClick={() => addItem('concepto')} disabled={adding} className="h-7 px-3 text-xs">
                       <Plus size={12} className="mr-1" /> Agregar ítem
@@ -852,7 +921,7 @@ export function ProyectoDetailClient({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-zinc-100 bg-zinc-50/60 text-xs font-medium text-zinc-500">
-                    {canEdit && (
+                    {canEditRow && (
                       <th className="pl-4 pr-2 py-2.5 w-8">
                         <input type="checkbox"
                           checked={sortedItems.length > 0 && selectedIds.size === sortedItems.length}
@@ -875,11 +944,11 @@ export function ProyectoDetailClient({
                     {show('margen') && <SortHeader col="margen" label="Margen" sort={sortState} onSort={cycleSort} className="w-24" />}
                     {show('igv') && <SortHeader col="igv" label="IGV" sort={sortState} onSort={cycleSort} className="w-24" />}
                     {show('estado_pago') && <th className="px-3 py-2.5 text-left w-32">Estado pago</th>}
-                    {canEdit && <th className="px-3 py-2.5 w-16" />}
+                    {canEditRow && <th className="px-3 py-2.5 w-16" />}
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedItems.length === 0 && !canEdit && (
+                  {sortedItems.length === 0 && !canEditRow && (
                     <tr><td colSpan={colCount} className="px-4 py-10 text-center text-sm text-zinc-400">Sin ítems aún.</td></tr>
                   )}
                   {sortedItems.map(item => (
@@ -889,11 +958,12 @@ export function ProyectoDetailClient({
                       proveedores={proveedores}
                       editingCell={editingCell}
                       saving={saving}
-                      canEdit={canEdit}
+                      canEdit={canEditRow}
+                      realDisabled={realDisabled}
                       show={show}
                       isSelected={selectedIds.has(item.id)}
                       onToggleSelect={toggleSelect}
-                      onStartEdit={(id, field) => canEdit && setEditingCell({ id, field })}
+                      onStartEdit={(id, field) => canEditRow && setEditingCell({ id, field })}
                       onSave={saveCell}
                       onSaveFields={saveFields}
                       onProveedorCreated={onProveedorCreated}
@@ -901,9 +971,9 @@ export function ProyectoDetailClient({
                       proyectoId={proyecto.id}
                     />
                   ))}
-                  {canEdit && (
+                  {canEditRow && (
                     <tr className="border-b border-zinc-100 cursor-text hover:bg-zinc-50/50" onClick={() => addItem('concepto')}>
-                      {canEdit && <td className="pl-4 pr-2 py-3" />}
+                      {canEditRow && <td className="pl-4 pr-2 py-3" />}
                       <td colSpan={colCount - 1} className="px-4 py-3">
                         <span className="text-sm text-zinc-300 italic select-none">
                           {adding ? 'Agregando…' : 'Haz clic aquí para agregar un nuevo ítem…'}
@@ -917,7 +987,7 @@ export function ProyectoDetailClient({
                 {items.length > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-zinc-200" style={{ backgroundColor: '#f0f4ff' }}>
-                      {canEdit && <td className="pl-4 pr-2 py-3" />}
+                      {canEditRow && <td className="pl-4 pr-2 py-3" />}
                       <td className="px-4 py-3 text-xs font-bold text-zinc-600 uppercase tracking-wide">Totales</td>
                       {show('cantidad') && <td className="px-3 py-3" />}
                       {show('unidad') && <td className="px-3 py-3" />}
@@ -951,7 +1021,7 @@ export function ProyectoDetailClient({
                         </td>
                       )}
                       {show('estado_pago') && <td className="px-3 py-3" />}
-                      {canEdit && <td className="px-2 py-3" />}
+                      {canEditRow && <td className="px-2 py-3" />}
                     </tr>
                     <tr style={{ backgroundColor: '#f0f4ff' }}>
                       <td colSpan={colCount} className="px-4 pb-3 text-xs text-zinc-400">
@@ -1081,6 +1151,7 @@ interface ItemRowProps {
   editingCell: { id: string; field: string } | null
   saving: string | null
   canEdit: boolean
+  realDisabled: boolean
   show: (col: ColKey) => boolean
   isSelected: boolean
   onToggleSelect: (id: string) => void
@@ -1093,7 +1164,7 @@ interface ItemRowProps {
 }
 
 function ItemRow({
-  item, proveedores, editingCell, saving, canEdit, show,
+  item, proveedores, editingCell, saving, canEdit, realDisabled, show,
   isSelected, onToggleSelect, onStartEdit, onSave, onSaveFields,
   onProveedorCreated, onOpenSheet,
 }: ItemRowProps) {
@@ -1204,15 +1275,23 @@ function ItemRow({
       </td>
 
       {/* Real (gasto_real) */}
-      <td className="px-3 py-2.5 text-right" onClick={() => onStartEdit(item.id, 'gasto_real')}>
-        {isEditing('gasto_real') ? (
-          <InlineMoneyInput defaultValue={centavosToSoles(item.gasto_real)} onSave={v => onSave(item.id, 'gasto_real', v)} />
-        ) : (
-          <span className={cn('text-sm tabular-nums', canEdit && 'cursor-text', item.gasto_real === 0 && 'text-zinc-300')}>
+      {realDisabled ? (
+        <td className="px-3 py-2.5 text-right cursor-not-allowed" title="Disponible en ejecución">
+          <span className="text-sm tabular-nums text-zinc-300 opacity-50">
             {item.gasto_real > 0 ? formatMoney(item.gasto_real) : '—'}
           </span>
-        )}
-      </td>
+        </td>
+      ) : (
+        <td className="px-3 py-2.5 text-right" onClick={() => onStartEdit(item.id, 'gasto_real')}>
+          {isEditing('gasto_real') ? (
+            <InlineMoneyInput defaultValue={centavosToSoles(item.gasto_real)} onSave={v => onSave(item.id, 'gasto_real', v)} />
+          ) : (
+            <span className={cn('text-sm tabular-nums', canEdit && 'cursor-text', item.gasto_real === 0 && 'text-zinc-300')}>
+              {item.gasto_real > 0 ? formatMoney(item.gasto_real) : '—'}
+            </span>
+          )}
+        </td>
+      )}
 
       {/* Varianza S/ */}
       {show('varianza') && (
@@ -1280,10 +1359,10 @@ function ItemRow({
 
       {/* IGV */}
       {show('igv') && (
-        <td className="px-3 py-2.5 text-right">
-          {item.tipo_comprobante === 'factura' ? (
+        <td className={cn('px-3 py-2.5 text-right', realDisabled && 'cursor-not-allowed opacity-50')} title={realDisabled ? 'Disponible en ejecución' : undefined}>
+          {!realDisabled && item.tipo_comprobante === 'factura' ? (
             <span className="text-sm tabular-nums text-blue-700">{formatMoney(igv)}</span>
-          ) : item.gasto_real > 0 ? (
+          ) : item.gasto_real > 0 && !realDisabled ? (
             <span className="text-sm text-zinc-300">S/ 0</span>
           ) : (
             <span className="text-sm text-zinc-300">—</span>
@@ -1293,8 +1372,8 @@ function ItemRow({
 
       {/* Estado pago */}
       {show('estado_pago') && (
-        <td className="px-3 py-2.5">
-          <InlineEstadoPago item={item} canEdit={canEdit} onSave={(ep, fp) => onSaveFields(item.id, { estado_pago: ep, fecha_pago: fp ?? null })} />
+        <td className={cn('px-3 py-2.5', realDisabled && 'cursor-not-allowed')} title={realDisabled ? 'Disponible en ejecución' : undefined}>
+          <InlineEstadoPago item={item} canEdit={canEdit && !realDisabled} onSave={(ep, fp) => onSaveFields(item.id, { estado_pago: ep, fecha_pago: fp ?? null })} />
         </td>
       )}
 
@@ -1806,5 +1885,44 @@ function ItemEditSheet({ item, proveedores, proyectoId, canEdit, onClose, onSave
         )}
       </SheetContent>
     </Sheet>
+  )
+}
+
+// ─── Fase Stepper ─────────────────────────────────────────────────────────────
+
+function FaseStepper({ fase, onStepClick }: {
+  fase: FaseProyecto
+  onStepClick: (f: FaseProyecto) => void
+}) {
+  const currentIdx = FASES.findIndex(f => f.value === fase)
+
+  return (
+    <nav className="flex items-center gap-0">
+      {FASES.map((step, idx) => {
+        const isPast    = idx < currentIdx
+        const isCurrent = idx === currentIdx
+        const isFuture  = idx > currentIdx
+
+        return (
+          <div key={step.value} className="flex items-center">
+            <button
+              onClick={() => onStepClick(step.value)}
+              className={cn(
+                'flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all',
+                isPast    && 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+                isCurrent && 'bg-blue-600 text-white shadow-sm',
+                isFuture  && 'bg-zinc-100 text-zinc-400 hover:bg-zinc-200',
+              )}
+            >
+              {isPast && <Check size={11} strokeWidth={3} />}
+              {step.label}
+            </button>
+            {idx < FASES.length - 1 && (
+              <div className={cn('mx-1 h-px w-6', idx < currentIdx ? 'bg-emerald-300' : 'bg-zinc-200')} />
+            )}
+          </div>
+        )
+      })}
+    </nav>
   )
 }
