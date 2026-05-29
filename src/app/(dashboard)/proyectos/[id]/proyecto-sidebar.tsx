@@ -5,13 +5,16 @@ import Link from 'next/link'
 import {
   Tag, Check, ChevronDown, ChevronRight, Plus, Pencil,
   Trash2, X, AlertTriangle, RefreshCw, User, Upload, Paperclip,
-  Link2, Link2Off,
+  Link2, Link2Off, HelpCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn, formatDate, formatMoney, centavosToSoles, solesToCentavos } from '@/lib/utils'
 import type { ProyectoData, ProyectoItem, ClienteData, FacturaProyecto, FacturaArchivoEntry, TeamMember } from './page'
 
@@ -102,6 +105,21 @@ function Toggle({ checked, onChange, disabled }: {
         checked ? 'translate-x-4' : 'translate-x-0',
       )} />
     </button>
+  )
+}
+
+function InfoTip({ text, side = 'left' }: { text: string; side?: 'left' | 'right' | 'top' | 'bottom' }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-default">
+          <HelpCircle size={12} className="text-zinc-300 hover:text-zinc-500 transition-colors" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side={side} className="max-w-[220px] text-xs leading-relaxed">
+        {text}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -987,111 +1005,109 @@ export function ProyectoSidebar({
       <Separator />
 
       {/* ── 3. FACTURACIÓN AL CLIENTE ────────────────────────────────────── */}
+      <TooltipProvider delayDuration={200}>
       <div className="p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-4">
           <SectionTitle>Facturación al cliente</SectionTitle>
           <SavedBadge show={facturaSaved} />
         </div>
 
-        {/* Subtotal con sincronización inteligente */}
-        <div className="mb-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-500">Subtotal</span>
-            <div className="flex items-center gap-1.5">
+        <div className="space-y-2 text-xs">
+
+          {/* ── Subtotal ── */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1 text-zinc-500 shrink-0">
+              Subtotal del proyecto
+              <InfoTip side="left" text="Monto base que se cobra al cliente antes de impuestos. Se sincroniza automáticamente con la suma de precios de venta de los ítems, pero puedes editarlo manualmente." />
+            </span>
+            <div className="flex items-center gap-1.5 min-w-0">
               {proyecto.subtotal_manual
-                ? <span title="Valor manual"><Link2Off size={11} className="text-amber-500 shrink-0" /></span>
-                : <span title="Sincronizado con ítems"><Link2 size={11} className="text-zinc-400 shrink-0" /></span>
+                ? <span title="Editado manualmente — desincronizado de los ítems"><Link2Off size={11} className="text-amber-500 shrink-0" /></span>
+                : <span title="Sincronizado con la suma de P. Venta de los ítems"><Link2 size={11} className="text-zinc-300 shrink-0" /></span>
               }
               {canEdit ? (
                 <InlineMoneyInput value={subtotalEfectivo} onSave={handleSubtotalSave} />
               ) : (
-                <span className="text-sm font-bold tabular-nums font-mono text-zinc-900">
+                <span className="font-semibold tabular-nums font-mono text-zinc-900">
                   {subtotalEfectivo > 0 ? formatMoney(subtotalEfectivo) : '—'}
                 </span>
               )}
             </div>
           </div>
           {proyecto.subtotal_manual && canEdit && (
-            <div className="flex justify-end mt-1">
+            <div className="flex justify-end">
               <button onClick={handleResync}
                 className="flex items-center gap-1 text-[10px] text-amber-600 hover:text-amber-800 hover:underline">
-                <RefreshCw size={9} /> Re-sincronizar ({formatMoney(subtotalItems)})
+                <RefreshCw size={9} /> Re-sincronizar con ítems ({formatMoney(subtotalItems)})
               </button>
             </div>
           )}
-        </div>
 
-        {/* Descuento */}
-        <div className="mb-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-500">Descuento</span>
-            {canEdit
-              ? <Toggle checked={descuentoOn} onChange={handleDescuentoToggle} />
-              : <span className="text-xs text-zinc-400">{descuentoOn ? 'Sí' : 'No'}</span>
-            }
-          </div>
-          {descuentoOn && (
-            <div className="mt-2 space-y-1.5">
-              <div className="flex items-center gap-2">
-                {/* Tipo segmented control */}
-                <div className="flex rounded border border-zinc-200 overflow-hidden text-xs shrink-0">
-                  <button
-                    onClick={() => canEdit && handleDescuentoTipo('pct')}
-                    className={cn('px-2.5 py-1 transition-colors', descuentoTipo === 'pct' ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-500 hover:bg-zinc-50')}
-                  >%</button>
-                  <button
-                    onClick={() => canEdit && handleDescuentoTipo('fijo')}
-                    className={cn('px-2.5 py-1 transition-colors border-l border-zinc-200', descuentoTipo === 'fijo' ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-500 hover:bg-zinc-50')}
-                  >S/</button>
+          {/* ── Descuento toggle + controls ── */}
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1 text-zinc-500 shrink-0">
+                − Descuento
+                <InfoTip side="left" text="Descuento aplicado sobre el subtotal antes de calcular el IGV y el margen." />
+              </span>
+              {canEdit
+                ? <Toggle checked={descuentoOn} onChange={handleDescuentoToggle} />
+                : <span className="text-zinc-400">{descuentoOn ? 'Sí' : 'No'}</span>
+              }
+            </div>
+            {descuentoOn && (
+              <div className="mt-2 space-y-1.5 pl-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex rounded border border-zinc-200 overflow-hidden text-xs shrink-0">
+                    <button
+                      onClick={() => canEdit && handleDescuentoTipo('pct')}
+                      className={cn('px-2.5 py-1 transition-colors', descuentoTipo === 'pct' ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-500 hover:bg-zinc-50')}
+                    >%</button>
+                    <button
+                      onClick={() => canEdit && handleDescuentoTipo('fijo')}
+                      className={cn('px-2.5 py-1 transition-colors border-l border-zinc-200', descuentoTipo === 'fijo' ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-500 hover:bg-zinc-50')}
+                    >S/</button>
+                  </div>
+                  <input
+                    type="number"
+                    step={descuentoTipo === 'pct' ? '1' : '0.01'}
+                    min="0"
+                    max={descuentoTipo === 'pct' ? '100' : undefined}
+                    defaultValue={descuentoTipo === 'pct' ? descuentoValorLocal : centavosToSoles(descuentoValorLocal).toFixed(2)}
+                    key={descuentoTipo}
+                    onChange={e => handleDescuentoValor(e.target.value)}
+                    disabled={!canEdit}
+                    className="flex-1 min-w-0 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-right tabular-nums outline-none focus:border-blue-400 disabled:bg-zinc-50 disabled:text-zinc-400"
+                  />
                 </div>
-                <input
-                  type="number"
-                  step={descuentoTipo === 'pct' ? '1' : '0.01'}
-                  min="0"
-                  max={descuentoTipo === 'pct' ? '100' : undefined}
-                  defaultValue={descuentoTipo === 'pct' ? descuentoValorLocal : centavosToSoles(descuentoValorLocal).toFixed(2)}
-                  key={`${descuentoTipo}`}
-                  onChange={e => handleDescuentoValor(e.target.value)}
-                  disabled={!canEdit}
-                  className="flex-1 min-w-0 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-right tabular-nums outline-none focus:border-blue-400 disabled:bg-zinc-50 disabled:text-zinc-400"
-                />
+                {descuentoMonto > 0 && (
+                  <p className="text-right text-zinc-400 tabular-nums">
+                    {descuentoTipo === 'pct'
+                      ? `−${descuentoValorLocal}% = −${formatMoney(descuentoMonto)}`
+                      : `−${formatMoney(descuentoMonto)}`}
+                  </p>
+                )}
               </div>
-              {descuentoMonto > 0 && (
-                <p className="text-[10px] text-right text-zinc-400 tabular-nums">
-                  {descuentoTipo === 'pct'
-                    ? `−${descuentoValorLocal}% = −${formatMoney(descuentoMonto)}`
-                    : `−${formatMoney(descuentoMonto)}`
-                  }
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
-        {/* Calculation breakdown */}
-        <div className="space-y-1.5 text-xs border-t border-zinc-100 pt-3">
+          {/* ── Separator + Base imponible (always shown) ── */}
+          <div className="border-t border-zinc-100 pt-2 flex items-center justify-between">
+            <span className="flex items-center gap-1 text-zinc-500">
+              Base imponible
+              <InfoTip side="left" text="Subtotal menos el descuento. Es la base sobre la que se calcula el IGV y el margen neto." />
+            </span>
+            <span className="tabular-nums font-mono text-zinc-700">{formatMoney(baseImponible)}</span>
+          </div>
 
-          {/* Descuento line */}
-          {descuentoOn && descuentoMonto > 0 && (
-            <div className="flex justify-between text-zinc-400">
-              <span>− Descuento</span>
-              <span className="tabular-nums font-mono">−{formatMoney(descuentoMonto)}</span>
-            </div>
-          )}
-
-          {/* Base imponible (only when descuento applies or IGV on) */}
-          {(descuentoOn && descuentoMonto > 0) && (
-            <div className="flex justify-between text-zinc-400 pb-1.5 border-b border-zinc-100">
-              <span className="italic">Base imponible</span>
-              <span className="tabular-nums font-mono">{formatMoney(baseImponible)}</span>
-            </div>
-          )}
-
-          {/* IGV toggle row */}
-          <div className="flex items-center justify-between">
-            <span className="text-zinc-500">+ IGV (18%)</span>
+          {/* ── IGV ── */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1 text-zinc-500 shrink-0">
+              + IGV 18%
+              <InfoTip side="left" text="Impuesto General a las Ventas (18%). Solo aplica si emites factura. No forma parte del margen — va al Estado." />
+            </span>
             <div className="flex items-center gap-2">
-              {proyecto.aplica_igv_venta && (
+              {proyecto.aplica_igv_venta && igvMonto > 0 && (
                 <span className="tabular-nums font-mono text-zinc-500">{formatMoney(igvMonto)}</span>
               )}
               {canEdit
@@ -1101,15 +1117,23 @@ export function ProyectoSidebar({
             </div>
           </div>
 
-          {/* Total */}
-          <div className="flex justify-between pt-1.5 border-t border-zinc-200 font-semibold text-zinc-800">
-            <span>Total</span>
-            <span className="tabular-nums font-mono">{total > 0 ? formatMoney(total) : '—'}</span>
+          {/* ── Total a cobrar ── */}
+          <div className="border-t border-zinc-200 pt-2 flex items-center justify-between">
+            <span className="flex items-center gap-1 font-semibold text-zinc-800">
+              Total a cobrar
+              <InfoTip side="left" text="Base imponible más IGV. Es el monto total que aparece en la factura." />
+            </span>
+            <span className="font-bold tabular-nums font-mono text-zinc-900 text-sm">
+              {total > 0 ? formatMoney(total) : '—'}
+            </span>
           </div>
 
-          {/* Detracción toggle row */}
+          {/* ── Detracción ── */}
           <div className="flex items-center justify-between gap-2">
-            <span className="text-zinc-500 shrink-0">− Detracción</span>
+            <span className="flex items-center gap-1 text-zinc-500 shrink-0">
+              − Detracción
+              <InfoTip side="left" text="El cliente retiene este monto y lo deposita en tu cuenta SPOT del Banco de la Nación antes de pagarte." />
+            </span>
             <div className="flex items-center gap-1.5">
               {proyecto.aplica_detraccion_venta && (
                 <>
@@ -1133,37 +1157,40 @@ export function ProyectoSidebar({
             </div>
           </div>
 
-          {/* Cliente abona */}
-          <div className="flex items-center justify-between pt-1.5 border-t border-zinc-200">
-            <span className="text-sm font-semibold text-zinc-700">Cliente abona</span>
+          {/* ── Cliente abona ── */}
+          <div className="border-t border-zinc-200 pt-2 flex items-center justify-between">
+            <span className="flex items-center gap-1 text-sm font-semibold text-zinc-700">
+              Cliente abona
+              <InfoTip side="left" text="Lo que el cliente te transfiere directamente. Total menos la detracción que deposita por separado en tu cuenta SPOT." />
+            </span>
             <span className="text-lg font-bold tabular-nums font-mono text-emerald-700">
               {clienteAbona > 0 ? formatMoney(clienteAbona) : '—'}
             </span>
           </div>
-        </div>
 
-        {/* Margen neto — calculado sobre base imponible, sin IGV */}
-        {(baseImponible > 0 || totalGastos > 0) && (
-          <div className="mt-3 pt-3 border-t border-dashed border-zinc-200 flex items-center justify-between">
-            <div>
-              <span className="text-xs font-medium text-zinc-500">Margen neto</span>
-              <p className="text-[10px] text-zinc-400">sobre base imponible, sin IGV</p>
+          {/* ── Margen neto ── */}
+          {(baseImponible > 0 || totalGastos > 0) && (
+            <div className="border-t border-dashed border-zinc-200 pt-2 flex items-center justify-between">
+              <span className="flex items-center gap-1 font-medium text-zinc-500">
+                Margen neto
+                <InfoTip side="left" text="Ganancia estimada sobre la base imponible (sin incluir IGV). Fórmula: Base imponible − costos reales (o estimados si no hay gastos registrados)." />
+              </span>
+              <span className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
+                margenPct === null ? 'bg-zinc-100 text-zinc-400'
+                : margenPct >= 30 ? 'bg-emerald-100 text-emerald-700'
+                : margenPct >= 15 ? 'bg-amber-100 text-amber-700'
+                : 'bg-red-100 text-red-700',
+              )}>
+                <span className="font-mono">{margenNeto >= 0 ? '+' : ''}{formatMoney(margenNeto)}</span>
+                {margenPct !== null && <span className="font-normal opacity-75">· {margenPct.toFixed(0)}%</span>}
+              </span>
             </div>
-            <span className={cn(
-              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
-              margenPct === null ? 'bg-zinc-100 text-zinc-400'
-              : margenPct >= 30 ? 'bg-emerald-100 text-emerald-700'
-              : margenPct >= 15 ? 'bg-amber-100 text-amber-700'
-              : 'bg-red-100 text-red-700',
-            )}>
-              <span className="font-mono">{margenNeto >= 0 ? '+' : ''}{formatMoney(margenNeto)}</span>
-              {margenPct !== null && (
-                <span className="font-normal opacity-75">· {margenPct.toFixed(0)}%</span>
-              )}
-            </span>
-          </div>
-        )}
+          )}
+
+        </div>
       </div>
+      </TooltipProvider>
 
       <Separator />
 
