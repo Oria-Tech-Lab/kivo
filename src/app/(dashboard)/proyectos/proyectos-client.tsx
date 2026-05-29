@@ -36,7 +36,7 @@ import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
 import { cn, formatMoney, formatDate } from '@/lib/utils'
 import { proyectoSchema, type ProyectoInput } from '@/lib/validations/proyecto'
-import type { ProyectoConMetricas, ClienteOption } from './page'
+import type { ProyectoConMetricas, ClienteOption, FacturacionStatus } from './page'
 
 const TIPO_LABEL: Record<string, string> = {
   digital: 'Digital',
@@ -61,10 +61,23 @@ const TIPOS_PROYECTO = [
 ] as const
 
 function margenStyle(pct: number): { color: string; bg: string } {
-  if (pct >= 35) return { color: '#059669', bg: '#ecfdf5' }
-  if (pct >= 25) return { color: '#2563eb', bg: '#eff6ff' }
+  if (pct >= 30) return { color: '#059669', bg: '#ecfdf5' }
   if (pct >= 15) return { color: '#d97706', bg: '#fffbeb' }
   return { color: '#dc2626', bg: '#fef2f2' }
+}
+
+const FACTURACION_CFG: Record<FacturacionStatus, { label: string; cls: string }> = {
+  sin_facturar: { label: 'Sin facturar',  cls: 'bg-zinc-100 text-zinc-500 border-zinc-200' },
+  vencida:      { label: 'Vencida',       cls: 'bg-red-50 text-red-700 border-red-200' },
+  pendiente:    { label: 'Pend. de pago', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  al_dia:       { label: 'Al día',        cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+}
+
+function FacturacionBadge({ status }: { status: FacturacionStatus }) {
+  const cfg = FACTURACION_CFG[status]
+  return (
+    <Badge variant="outline" className={cn('text-xs font-medium', cfg.cls)}>{cfg.label}</Badge>
+  )
 }
 
 function healthLabel(avg: number): { label: string } {
@@ -387,15 +400,15 @@ function NuevoProyectoDialog({ clientes, canCreate }: { clientes: ClienteOption[
   )
 }
 
-function MargenBadge({ pct, className }: { pct: number; className?: string }) {
+function MargenCell({ pct, montoS }: { pct: number; montoS: number }) {
   const ms = margenStyle(pct)
   return (
-    <span
-      className={cn('inline-block rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums', className)}
-      style={{ background: ms.bg, color: ms.color }}
-    >
-      {pct.toFixed(1)}%
-    </span>
+    <div className="text-right">
+      <div className="font-semibold text-sm tabular-nums" style={{ color: ms.color }}>
+        {formatMoney(montoS)}
+      </div>
+      <div className="text-xs tabular-nums text-zinc-400">{pct.toFixed(1)}%</div>
+    </div>
   )
 }
 
@@ -695,9 +708,9 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
                 <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Proyecto</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 hidden md:table-cell">Cliente</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500">Estado</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Margen</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 hidden lg:table-cell">Ejecución</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500 hidden lg:table-cell">Facturado</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500 hidden md:table-cell">Total gastos</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Margen S/</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 hidden md:table-cell">Facturación</th>
                 <th className="px-4 py-3 text-center text-xs font-medium text-zinc-500 hidden md:table-cell">Alertas</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500">Acciones</th>
               </tr>
@@ -736,21 +749,22 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
                     </Badge>
                   </td>
 
-                  <td className="px-4 py-3 text-right">
-                    <MargenBadge pct={proyecto.margen_pct} />
+                  <td className="px-4 py-3 text-right tabular-nums text-sm hidden md:table-cell">
+                    {proyecto.gasto_real_total > 0
+                      ? <span className="text-zinc-700">{formatMoney(proyecto.gasto_real_total)}</span>
+                      : <span className="text-zinc-300">{formatMoney(0)}</span>
+                    }
                   </td>
 
-                  <td className="px-4 py-3 hidden lg:table-cell">
-                    <div className="flex items-center gap-2 min-w-[100px]">
-                      <Progress value={proyecto.ejecucion_pct} className="h-1.5 flex-1" />
-                      <span className="text-xs text-zinc-500 tabular-nums w-9 text-right">
-                        {proyecto.ejecucion_pct.toFixed(0)}%
-                      </span>
-                    </div>
+                  <td className="px-4 py-3">
+                    <MargenCell
+                      pct={proyecto.margen_pct}
+                      montoS={proyecto.precio_venta_total - proyecto.gasto_real_total}
+                    />
                   </td>
 
-                  <td className="px-4 py-3 text-right tabular-nums text-sm text-zinc-700 hidden lg:table-cell">
-                    {formatMoney(proyecto.facturado_total)}
+                  <td className="px-4 py-3 hidden md:table-cell">
+                    <FacturacionBadge status={proyecto.facturacion_status} />
                   </td>
 
                   <td className="px-4 py-3 text-center hidden md:table-cell">

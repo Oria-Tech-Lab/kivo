@@ -6,6 +6,8 @@ import { ProyectosClient } from './proyectos-client'
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Proyectos — Kivo' }
 
+export type FacturacionStatus = 'sin_facturar' | 'vencida' | 'pendiente' | 'al_dia'
+
 export interface ProyectoConMetricas {
   id: string
   nombre: string
@@ -22,6 +24,7 @@ export interface ProyectoConMetricas {
   alertas_count: number
   margen_pct: number
   ejecucion_pct: number
+  facturacion_status: FacturacionStatus
 }
 
 export interface ClienteOption {
@@ -45,7 +48,7 @@ export default async function ProyectosPage() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase.from('facturas_proyecto' as never) as any)
-      .select('proyecto_id, subtotal, estado'),
+      .select('proyecto_id, subtotal, estado, fecha_vencimiento'),
 
     supabase
       .from('alertas')
@@ -71,7 +74,7 @@ export default async function ProyectosPage() {
   }>
 
   const facturas = (facturasRes.data ?? []) as Array<{
-    proyecto_id: string; subtotal: number; estado: string
+    proyecto_id: string; subtotal: number; estado: string; fecha_vencimiento: string | null
   }>
 
   const alertas = (alertasRes.data ?? []) as Array<{ referencia_id: string }>
@@ -85,10 +88,26 @@ export default async function ProyectosPage() {
     return acc
   }, {})
 
-  const facturasByProyecto = facturas.reduce<Record<string, number>>((acc, f) => {
+  const today = new Date().toISOString().split('T')[0]
+
+  function computeFacturacionStatus(
+    rows: Array<{ estado: string; fecha_vencimiento: string | null }>
+  ): FacturacionStatus {
+    if (rows.length === 0) return 'sin_facturar'
+    if (rows.some(f => f.estado !== 'cobrada' && f.fecha_vencimiento != null && f.fecha_vencimiento < today)) return 'vencida'
+    if (rows.every(f => f.estado === 'cobrada')) return 'al_dia'
+    return 'pendiente'
+  }
+
+  const facturasByProyecto = facturas.reduce<Record<string, {
+    facturado: number
+    rows: Array<{ estado: string; fecha_vencimiento: string | null }>
+  }>>((acc, f) => {
+    if (!acc[f.proyecto_id]) acc[f.proyecto_id] = { facturado: 0, rows: [] }
     if (f.estado === 'emitida' || f.estado === 'cobrada') {
-      acc[f.proyecto_id] = (acc[f.proyecto_id] ?? 0) + f.subtotal
+      acc[f.proyecto_id].facturado += f.subtotal
     }
+    acc[f.proyecto_id].rows.push({ estado: f.estado, fecha_vencimiento: f.fecha_vencimiento })
     return acc
   }, {})
 
@@ -99,7 +118,8 @@ export default async function ProyectosPage() {
 
   const proyectos: ProyectoConMetricas[] = proyectosRaw.map(p => {
     const it = itemsByProyecto[p.id] ?? { precio_venta: 0, costo_estimado: 0, gasto_real: 0 }
-    const facturado = facturasByProyecto[p.id] ?? 0
+    const facturado = facturasByProyecto[p.id]?.facturado ?? 0
+    const facturacionRows = facturasByProyecto[p.id]?.rows ?? []
     const alertasCount = alertasByProyecto[p.id] ?? 0
     const margenPct = it.precio_venta > 0
       ? ((it.precio_venta - it.gasto_real) / it.precio_venta) * 100
@@ -124,6 +144,7 @@ export default async function ProyectosPage() {
       alertas_count: alertasCount,
       margen_pct: margenPct,
       ejecucion_pct: ejecucionPct,
+      facturacion_status: computeFacturacionStatus(facturacionRows),
     }
   })
 
