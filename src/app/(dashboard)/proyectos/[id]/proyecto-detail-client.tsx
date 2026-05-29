@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import {
-  ChevronLeft, Plus, Trash2, Check, X,
+  ChevronLeft, Plus, Trash2, Check, X, Pencil,
   FileText, Wallet, TrendingUp, BarChart3, PanelRight,
   ChevronUp, ChevronDown, ChevronsUpDown, Settings2,
   Upload, Paperclip, Image as ImageIcon, Copy,
@@ -188,10 +188,17 @@ export function ProyectoDetailClient({
   const [fase, setFase]           = useState<FaseProyecto>((proyecto.fase as FaseProyecto) ?? 'cotizacion')
   const [faseTarget, setFaseTarget] = useState<FaseProyecto | null>(null)
   const [savingFase, setSavingFase] = useState(false)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg]       = useState<string | null>(null)
+  const [editingNombre, setEditingNombre] = useState(false)
+  const [nombreLocal, setNombreLocal]     = useState(proyecto.nombre)
+  const nombreInputRef                    = useRef<HTMLInputElement>(null)
 
   // Sync local fase state when proyecto.fase is updated (e.g. via sidebar selector)
   useEffect(() => { setFase((proyecto.fase as FaseProyecto) ?? 'cotizacion') }, [proyecto.fase])
+  useEffect(() => { setNombreLocal(proyecto.nombre) }, [proyecto.nombre])
+  useEffect(() => {
+    if (editingNombre) { nombreInputRef.current?.focus(); nombreInputRef.current?.select() }
+  }, [editingNombre])
 
   function showSuccess(msg: string) {
     setSuccessMsg(msg)
@@ -419,6 +426,37 @@ export function ProyectoDetailClient({
   function showError(msg: string) {
     setApiError(msg)
     setTimeout(() => setApiError(null), 5000)
+  }
+
+  // ── Nombre inline save ────────────────────────────────────────────────────────
+
+  async function saveNombre(newNombre: string) {
+    const trimmed = newNombre.trim()
+    setEditingNombre(false)
+    if (!trimmed || trimmed === proyecto.nombre) {
+      setNombreLocal(proyecto.nombre)
+      return
+    }
+    const prevNombre = proyecto.nombre
+    setProyecto(prev => ({ ...prev, nombre: trimmed }))
+    try {
+      const res = await fetch(`/api/proyectos/${proyecto.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: trimmed }),
+      })
+      if (!res.ok) {
+        setProyecto(prev => ({ ...prev, nombre: prevNombre }))
+        setNombreLocal(prevNombre)
+        showError('Error al guardar el nombre')
+      } else {
+        showSuccess('Nombre guardado')
+      }
+    } catch {
+      setProyecto(prev => ({ ...prev, nombre: prevNombre }))
+      setNombreLocal(prevNombre)
+      showError('Error de red al guardar el nombre')
+    }
   }
 
   // ── Save helpers ─────────────────────────────────────────────────────────────
@@ -829,7 +867,35 @@ export function ProyectoDetailClient({
             </Link>
             <div className="mt-2 flex flex-wrap items-start gap-3">
               <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-bold tracking-tight text-zinc-900">{proyecto.nombre}</h1>
+                {editingNombre ? (
+                  <input
+                    ref={nombreInputRef}
+                    value={nombreLocal}
+                    onChange={e => setNombreLocal(e.target.value)}
+                    onBlur={e => saveNombre(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      if (e.key === 'Escape') { setNombreLocal(proyecto.nombre); setEditingNombre(false) }
+                    }}
+                    className="text-2xl font-bold tracking-tight text-zinc-900 bg-transparent border-b-2 border-blue-400 outline-none min-w-0 w-full max-w-xl"
+                  />
+                ) : (
+                  <h1
+                    className="text-2xl font-bold tracking-tight text-zinc-900 group/nombre flex items-center gap-2"
+                    onDoubleClick={() => canEdit && setEditingNombre(true)}
+                  >
+                    {proyecto.nombre}
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); setEditingNombre(true) }}
+                        className="text-zinc-300 hover:text-zinc-600 transition-colors opacity-0 group-hover/nombre:opacity-100"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    )}
+                  </h1>
+                )}
                 <Badge variant="outline" className={ESTADO_BADGE[proyecto.estado] ?? ''}>{ESTADO_LABEL[proyecto.estado] ?? proyecto.estado}</Badge>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -956,7 +1022,7 @@ export function ProyectoDetailClient({
                         />
                       </th>
                     )}
-                    <th className="px-4 py-2.5 text-left w-52">Concepto</th>
+                    <th className="px-4 py-2.5 text-left min-w-[240px]">Concepto</th>
                     {show('cantidad') && <th className="px-3 py-2.5 text-right w-20">Cantidad</th>}
                     {show('unidad') && <th className="px-3 py-2.5 text-left w-20">Unidad</th>}
                     {show('proveedor') && <th className="px-3 py-2.5 text-left w-36">Proveedor</th>}
@@ -1225,7 +1291,7 @@ function ItemRow({
         {isEditing('concepto') ? (
           <InlineInput defaultValue={item.concepto} onSave={(v, silent) => onSave(item.id, 'concepto', v, silent)} placeholder="Describe el ítem..." />
         ) : (
-          <span className={cn('block text-sm', canEdit && 'cursor-text', !item.concepto && 'text-zinc-300 italic')}>
+          <span className={cn('block text-sm whitespace-normal break-words line-clamp-2', canEdit && 'cursor-text', !item.concepto && 'text-zinc-300 italic')}>
             {item.concepto || (canEdit ? 'Concepto…' : '—')}
           </span>
         )}

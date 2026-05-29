@@ -7,6 +7,7 @@ import { z } from 'zod'
 type Params = { params: { id: string } }
 
 const patchSchema = z.object({
+  nombre:                  z.string().min(1).max(200).optional(),
   estado:                  z.enum(['activo', 'en_pausa', 'cerrado']).optional(),
   notas:                   z.string().max(5000).optional().nullable(),
   tipo:                    z.enum(['digital', 'offline', 'evento', 'instalacion', 'otro']).optional(),
@@ -45,7 +46,7 @@ export async function PATCH(request: Request, { params }: Params) {
     .update(parsed.data)
     .eq('id', params.id)
     .eq('org_id', auth.orgId)
-    .select('id, estado, notas, tipo, fecha_inicio, fecha_cierre_est, aplica_detraccion, cliente_id, responsable_id, subtotal_proyecto, subtotal_manual, aplica_igv_venta, aplica_detraccion_venta, pct_detraccion_venta, fase, descuento_tipo, descuento_valor')
+    .select('id, nombre, estado, notas, tipo, fecha_inicio, fecha_cierre_est, aplica_detraccion, cliente_id, responsable_id, subtotal_proyecto, subtotal_manual, aplica_igv_venta, aplica_detraccion_venta, pct_detraccion_venta, fase, descuento_tipo, descuento_valor')
     .single()
 
   if (error || !proyecto) return apiError('Error actualizando proyecto', 500, error ?? undefined)
