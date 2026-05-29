@@ -4,7 +4,7 @@ import { useState, useMemo, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Search, LayoutGrid, Table2, AlertTriangle, ChevronRight,
+  Search, LayoutGrid, Table2, AlertTriangle, ChevronRight, ChevronUp, ChevronDown,
   MoreHorizontal, Plus, Pencil, Trash2, Activity, TrendingUp, SlidersHorizontal,
   Calendar, X,
 } from 'lucide-react'
@@ -636,6 +636,17 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
   const [periodoPreset, setPeriodoPreset] = useState<PeriodoPreset>('all')
   const [customDesde, setCustomDesde] = useState('')
   const [customHasta, setCustomHasta] = useState('')
+  const [headerCollapsed, setHeaderCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return localStorage.getItem('kivo_projects_header_collapsed') === 'true' } catch { return false }
+  })
+  function toggleHeader() {
+    setHeaderCollapsed(prev => {
+      const next = !prev
+      try { localStorage.setItem('kivo_projects_header_collapsed', String(next)) } catch { /* ignore */ }
+      return next
+    })
+  }
 
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
     if (typeof window === 'undefined') return new Set(DEFAULT_VISIBLE_COLS)
@@ -725,14 +736,33 @@ export function ProyectosClient({ proyectos, clientes, canEdit, canDelete }: Pro
         <NuevoProyectoDialog clientes={clientes} canCreate={canEdit} />
       </div>
 
-      {/* Featured + Health */}
+      {/* Featured + Health — collapsible */}
       {featured && (
-        <div className="grid grid-cols-10 gap-4">
-          <div className="col-span-7">
-            <FeaturedProjectCard proyecto={featured} />
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Resumen</span>
+            <button
+              onClick={toggleHeader}
+              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors"
+            >
+              {headerCollapsed ? 'Mostrar' : 'Ocultar'}
+              {headerCollapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+            </button>
           </div>
-          <div className="col-span-3">
-            <PortfolioHealthCard proyectos={proyectos} />
+          <div
+            className={cn(
+              'overflow-hidden transition-[max-height] duration-300 ease-in-out',
+              headerCollapsed ? 'max-h-0' : 'max-h-[600px]',
+            )}
+          >
+            <div className="grid grid-cols-10 gap-4">
+              <div className="col-span-7">
+                <FeaturedProjectCard proyecto={featured} />
+              </div>
+              <div className="col-span-3">
+                <PortfolioHealthCard proyectos={proyectos} />
+              </div>
+            </div>
           </div>
         </div>
       )}
