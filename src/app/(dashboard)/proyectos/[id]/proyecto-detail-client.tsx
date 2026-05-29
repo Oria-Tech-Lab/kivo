@@ -4,10 +4,10 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ChevronLeft, Pencil, Plus, Trash2, Check, X,
+  ChevronLeft, Plus, Trash2, Check, X,
   FileText, Wallet, TrendingUp, BarChart3, PanelRight,
   ChevronUp, ChevronDown, ChevronsUpDown, Settings2,
-  Upload, Paperclip, Image as ImageIcon,
+  Upload, Paperclip, Image as ImageIcon, Copy,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -166,6 +166,95 @@ export function ProyectoDetailClient({
   function switchKpiView(v: 'presupuesto' | 'real') {
     setKpiView(v)
     try { localStorage.setItem('kivo_project_kpi_view', v) } catch { /* ignore */ }
+  }
+
+  const [selectedIds, setSelectedIds]         = useState<Set<string>>(new Set())
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false)
+  const [bulkOperating, setBulkOperating]     = useState(false)
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(prev =>
+      prev.size === sortedItems.length && sortedItems.length > 0
+        ? new Set()
+        : new Set(sortedItems.map(i => i.id))
+    )
+  }
+
+  async function duplicateSelected() {
+    if (bulkOperating) return
+    setBulkOperating(true)
+    const toDuplicate = items.filter(i => selectedIds.has(i.id))
+    const tempItems = toDuplicate.map((item, idx) => ({
+      ...item,
+      id: crypto.randomUUID(),
+      estado: 'presupuestado' as const,
+      gasto_real: 0,
+      precio_unitario: 0,
+      estado_pago: 'pendiente' as const,
+      fecha_pago: null,
+      foto_url: null,
+      factura_url: null,
+      constancia_pago_url: null,
+      sort_order: items.length + idx,
+      created_at: new Date().toISOString(),
+    }))
+    const tempIds = tempItems.map(t => t.id)
+    setItems(prev => [...prev, ...tempItems])
+    setSelectedIds(new Set())
+    try {
+      const responses = await Promise.all(
+        toDuplicate.map((item, idx) =>
+          fetch(`/api/proyectos/${proyecto.id}/items`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              concepto: item.concepto, unidad: item.unidad, proveedor_id: item.proveedor_id,
+              costo_estimado: item.costo_estimado, precio_venta: item.precio_venta,
+              gasto_real: 0, cantidad: item.cantidad, precio_unitario: item.precio_unitario,
+              tipo_comprobante: item.tipo_comprobante, estado_pago: 'pendiente',
+              estado: 'presupuestado', sort_order: items.length + idx,
+            }),
+          }).then(r => { if (!r.ok) throw new Error(); return r.json() as Promise<ProyectoItem> })
+        )
+      )
+      setItems(prev => {
+        const base = prev.filter(i => !tempIds.includes(i.id))
+        return [...base, ...responses]
+      })
+    } catch {
+      setItems(prev => prev.filter(i => !tempIds.includes(i.id)))
+      showError('Error al duplicar ítems')
+    } finally {
+      setBulkOperating(false)
+    }
+  }
+
+  async function deleteSelected() {
+    if (bulkOperating) return
+    setBulkOperating(true)
+    const toDelete = Array.from(selectedIds)
+    const snapshot = items
+    setItems(prev => prev.filter(i => !toDelete.includes(i.id)))
+    setSelectedIds(new Set())
+    setShowBulkDeleteDialog(false)
+    try {
+      const results = await Promise.all(
+        toDelete.map(id => fetch(`/api/proyectos/${proyecto.id}/items/${id}`, { method: 'DELETE' }))
+      )
+      if (results.some(r => !r.ok)) {
+        setItems(snapshot)
+        showError('Error al eliminar algunos ítems')
+      }
+    } catch {
+      setItems(snapshot)
+      showError('Error al eliminar ítems')
+    } finally {
+      setBulkOperating(false)
+    }
   }
 
   // Sort state
@@ -421,17 +510,6 @@ export function ProyectoDetailClient({
     }
   }
 
-  async function deleteItem(itemId: string) {
-    if (!canDelete || !confirm('¿Eliminar esta fila?')) return
-    const snapshot = items
-    setItems(prev => prev.filter(i => i.id !== itemId)) // optimistic
-    const res = await fetch(`/api/proyectos/${proyecto.id}/items/${itemId}`, { method: 'DELETE' })
-    if (!res.ok) {
-      setItems(snapshot) // revert
-      showError('Error al eliminar el ítem')
-    }
-  }
-
   function onProveedorCreated(p: Proveedor) {
     setProveedores(prev => [...prev, p].sort((a, b) => a.razon_social.localeCompare(b.razon_social)))
   }
@@ -455,10 +533,11 @@ export function ProyectoDetailClient({
 
   // Total columns including fixed ones
   const colCount = 4 /* concepto+presupuestado+real+estado */ +
+    (canEdit ? 1 : 0) /* checkbox */ +
     (show('cantidad') ? 1 : 0) + (show('unidad') ? 1 : 0) + (show('proveedor') ? 1 : 0) +
     (show('tipo_comp') ? 1 : 0) + (show('varianza') ? 1 : 0) + (show('precio_venta') ? 1 : 0) +
     (show('margen') ? 1 : 0) + (show('igv') ? 1 : 0) + (show('estado_pago') ? 1 : 0) +
-    (canEdit ? 1 : 0)
+    (canEdit ? 1 : 0) /* actions */
 
   // ── KPI cards ────────────────────────────────────────────────────────────────
 
@@ -608,6 +687,24 @@ export function ProyectoDetailClient({
         </DialogContent>
       </Dialog>
 
+      {/* Bulk delete confirmation */}
+      <Dialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Eliminar {selectedIds.size} ítem{selectedIds.size !== 1 ? 's' : ''}</DialogTitle>
+            <DialogDescription className="text-zinc-500 text-sm mt-1">
+              Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowBulkDeleteDialog(false)}>Cancelar</Button>
+            <Button size="sm" variant="destructive" onClick={deleteSelected} disabled={bulkOperating}>
+              {bulkOperating ? 'Eliminando…' : 'Eliminar'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Error banner */}
       {apiError && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 shadow-lg text-sm text-red-700 max-w-lg">
@@ -697,6 +794,18 @@ export function ProyectoDetailClient({
                     <X size={11} /> Quitar filtro
                   </button>
                 )}
+                {canEdit && (
+                  <>
+                    <Button size="sm" onClick={() => addItem('concepto')} disabled={adding} className="h-7 px-3 text-xs">
+                      <Plus size={12} className="mr-1" /> Agregar ítem
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={adding}
+                      className="h-7 px-3 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                      onClick={() => addItem('gasto_real')}>
+                      <Plus size={12} className="mr-1" /> Gasto extra
+                    </Button>
+                  </>
+                )}
                 {/* Column visibility */}
                 <Popover>
                   <PopoverTrigger asChild>
@@ -717,10 +826,42 @@ export function ProyectoDetailClient({
               </div>
             </div>
 
+            {/* Bulk action toolbar */}
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-3 px-5 py-2.5 bg-zinc-900 text-white text-sm">
+                <span className="font-medium">{selectedIds.size} ítem{selectedIds.size !== 1 ? 's' : ''} seleccionado{selectedIds.size !== 1 ? 's' : ''}</span>
+                <span className="text-zinc-500">·</span>
+                <button onClick={duplicateSelected} disabled={bulkOperating}
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-zinc-700 hover:bg-zinc-600 transition-colors disabled:opacity-50">
+                  <Copy size={12} /> Duplicar
+                </button>
+                {canDelete && (
+                  <button onClick={() => setShowBulkDeleteDialog(true)} disabled={bulkOperating}
+                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-red-600 hover:bg-red-500 transition-colors disabled:opacity-50">
+                    <Trash2 size={12} /> Eliminar
+                  </button>
+                )}
+                <button onClick={() => setSelectedIds(new Set())}
+                  className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white transition-colors">
+                  <X size={12} /> Cancelar
+                </button>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-zinc-100 bg-zinc-50/60 text-xs font-medium text-zinc-500">
+                    {canEdit && (
+                      <th className="pl-4 pr-2 py-2.5 w-8">
+                        <input type="checkbox"
+                          checked={sortedItems.length > 0 && selectedIds.size === sortedItems.length}
+                          ref={el => { if (el) el.indeterminate = selectedIds.size > 0 && selectedIds.size < sortedItems.length }}
+                          onChange={toggleSelectAll}
+                          className="h-3.5 w-3.5 rounded accent-zinc-900 cursor-pointer"
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-2.5 text-left w-52">Concepto</th>
                     {show('cantidad') && <th className="px-3 py-2.5 text-right w-20">Cantidad</th>}
                     {show('unidad') && <th className="px-3 py-2.5 text-left w-20">Unidad</th>}
@@ -749,12 +890,12 @@ export function ProyectoDetailClient({
                       editingCell={editingCell}
                       saving={saving}
                       canEdit={canEdit}
-                      canDelete={canDelete}
                       show={show}
+                      isSelected={selectedIds.has(item.id)}
+                      onToggleSelect={toggleSelect}
                       onStartEdit={(id, field) => canEdit && setEditingCell({ id, field })}
                       onSave={saveCell}
                       onSaveFields={saveFields}
-                      onDelete={deleteItem}
                       onProveedorCreated={onProveedorCreated}
                       onOpenSheet={() => setEditingSheet(item)}
                       proyectoId={proyecto.id}
@@ -762,7 +903,8 @@ export function ProyectoDetailClient({
                   ))}
                   {canEdit && (
                     <tr className="border-b border-zinc-100 cursor-text hover:bg-zinc-50/50" onClick={() => addItem('concepto')}>
-                      <td colSpan={colCount} className="px-4 py-3">
+                      {canEdit && <td className="pl-4 pr-2 py-3" />}
+                      <td colSpan={colCount - 1} className="px-4 py-3">
                         <span className="text-sm text-zinc-300 italic select-none">
                           {adding ? 'Agregando…' : 'Haz clic aquí para agregar un nuevo ítem…'}
                         </span>
@@ -775,6 +917,7 @@ export function ProyectoDetailClient({
                 {items.length > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-zinc-200" style={{ backgroundColor: '#f0f4ff' }}>
+                      {canEdit && <td className="pl-4 pr-2 py-3" />}
                       <td className="px-4 py-3 text-xs font-bold text-zinc-600 uppercase tracking-wide">Totales</td>
                       {show('cantidad') && <td className="px-3 py-3" />}
                       {show('unidad') && <td className="px-3 py-3" />}
@@ -830,17 +973,6 @@ export function ProyectoDetailClient({
               </table>
             </div>
 
-            {canEdit && (
-              <div className="flex gap-3 px-5 py-4 border-t border-zinc-100">
-                <Button size="sm" onClick={() => addItem('concepto')} disabled={adding}>
-                  <Plus size={13} className="mr-1.5" /> Agregar ítem presupuestado
-                </Button>
-                <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50"
-                  onClick={() => addItem('gasto_real')} disabled={adding}>
-                  ✦ Agregar gasto extra
-                </Button>
-              </div>
-            )}
           </div>
 
           {/* Proveedores */}
@@ -949,20 +1081,21 @@ interface ItemRowProps {
   editingCell: { id: string; field: string } | null
   saving: string | null
   canEdit: boolean
-  canDelete: boolean
   show: (col: ColKey) => boolean
+  isSelected: boolean
+  onToggleSelect: (id: string) => void
   onStartEdit: (id: string, field: string) => void
   onSave: (id: string, field: string, value: unknown, silent?: boolean) => Promise<void>
   onSaveFields: (id: string, fields: Record<string, unknown>) => Promise<void>
-  onDelete: (id: string) => Promise<void>
   onProveedorCreated: (p: Proveedor) => void
   onOpenSheet: () => void
   proyectoId: string
 }
 
 function ItemRow({
-  item, proveedores, editingCell, saving, canEdit, canDelete, show,
-  onStartEdit, onSave, onSaveFields, onDelete, onProveedorCreated, onOpenSheet,
+  item, proveedores, editingCell, saving, canEdit, show,
+  isSelected, onToggleSelect, onStartEdit, onSave, onSaveFields,
+  onProveedorCreated, onOpenSheet,
 }: ItemRowProps) {
   const isEditing = (f: string) => editingCell?.id === item.id && editingCell.field === f
   const isSaving  = saving === item.id
@@ -975,7 +1108,15 @@ function ItemRow({
   const isCancelado  = item.estado === 'cancelado'
 
   return (
-    <tr className={cn('group border-b border-zinc-100 transition-colors', cfg.row, isSaving && 'opacity-50', isCancelado && 'line-through text-zinc-400 opacity-60')}>
+    <tr className={cn('group border-b border-zinc-100 transition-colors', cfg.row, isSelected && 'bg-blue-50/60', isSaving && 'opacity-50', isCancelado && 'line-through text-zinc-400 opacity-60')}>
+
+      {/* Checkbox */}
+      {canEdit && (
+        <td className="pl-4 pr-2 py-2.5" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(item.id)}
+            className="h-3.5 w-3.5 rounded accent-zinc-900 cursor-pointer" />
+        </td>
+      )}
 
       {/* Concepto */}
       <td className="px-4 py-2.5" onClick={() => onStartEdit(item.id, 'concepto')}>
@@ -1159,17 +1300,12 @@ function ItemRow({
 
       {/* Acciones */}
       {canEdit && (
-        <td className="px-2 py-2.5">
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={onOpenSheet} className="p-1 text-zinc-400 hover:text-zinc-700 rounded" title="Editar detalle">
-              <Pencil size={12} />
-            </button>
-            {canDelete && (
-              <button onClick={() => onDelete(item.id)} className="p-1 text-zinc-300 hover:text-red-500 rounded" title="Eliminar">
-                <Trash2 size={12} />
-              </button>
-            )}
-          </div>
+        <td className="px-2 py-2">
+          <Button variant="ghost" size="sm" onClick={onOpenSheet}
+            title="Ver descripción, imagen y adjuntos"
+            className="h-7 px-2 text-xs text-zinc-500 hover:text-zinc-900 gap-1">
+            <FileText size={13} /> Detalle
+          </Button>
         </td>
       )}
     </tr>
