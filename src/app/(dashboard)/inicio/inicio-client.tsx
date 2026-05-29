@@ -21,8 +21,8 @@ import type {
   AlertaItem, ClienteOpt, ProveedorOpt, ProyectoOpt,
   RawMovR, RawMovP, RawProyecto, RawItem, RawGasto,
   ChartDataPoint, KpiData, ProyectoRentabilidad, DistribucionItem, SaludData,
-} from './page'
-import { TIPO_CFG } from './page'
+} from './types'
+import { TIPO_CFG } from './types'
 
 // ── Filter types ──────────────────────────────────────────────────────────────
 
