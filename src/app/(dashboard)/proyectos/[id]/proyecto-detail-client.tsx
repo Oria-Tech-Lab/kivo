@@ -189,6 +189,8 @@ export function ProyectoDetailClient({
   const [faseTarget, setFaseTarget] = useState<FaseProyecto | null>(null)
   const [savingFase, setSavingFase] = useState(false)
   const [successMsg, setSuccessMsg]       = useState<string | null>(null)
+  const [showMigrationDialog, setShowMigrationDialog] = useState(false)
+  const [migrando, setMigrando]           = useState(false)
   const [editingNombre, setEditingNombre] = useState(false)
   const [nombreLocal, setNombreLocal]     = useState(proyecto.nombre)
   const nombreInputRef                    = useRef<HTMLInputElement>(null)
@@ -310,6 +312,13 @@ export function ProyectoDetailClient({
         setFase(prevFase)
         setProyecto(prev => ({ ...prev, fase: prevFase }))
         showError('Error al cambiar la fase del proyecto')
+      } else if (newFase === 'ejecucion') {
+        try {
+          const key = `kivo_migration_dialog_${proyecto.id}`
+          const hasSeen = localStorage.getItem(key)
+          const hasItemsToMigrate = items.some(i => i.gasto_real === 0 && i.costo_estimado > 0)
+          if (!hasSeen && hasItemsToMigrate) setShowMigrationDialog(true)
+        } catch { /* ignore */ }
       }
     } catch {
       setFase(prevFase)
@@ -631,6 +640,41 @@ export function ProyectoDetailClient({
     }
   }
 
+  async function handleMigracion() {
+    setMigrando(true)
+    try { localStorage.setItem(`kivo_migration_dialog_${proyecto.id}`, '1') } catch { /* ignore */ }
+    const toMigrate = items.filter(i => i.gasto_real === 0 && i.costo_estimado > 0)
+    setItems(prev => prev.map(i =>
+      i.gasto_real === 0 && i.costo_estimado > 0
+        ? { ...i, gasto_real: i.costo_estimado, estado: 'en_ejecucion' as EstadoItem, precio_unitario: i.cantidad > 0 ? Math.round(i.costo_estimado / i.cantidad) : i.precio_unitario }
+        : i
+    ))
+    setShowMigrationDialog(false)
+    try {
+      await Promise.all(toMigrate.map(i =>
+        fetch(`/api/proyectos/${proyecto.id}/items/${i.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gasto_real: i.costo_estimado, estado: 'en_ejecucion', precio_unitario: i.cantidad > 0 ? Math.round(i.costo_estimado / i.cantidad) : i.precio_unitario }),
+        }).then(r => { if (!r.ok) throw new Error() })
+      ))
+      showSuccess(`${toMigrate.length} ítem${toMigrate.length !== 1 ? 's' : ''} copiado${toMigrate.length !== 1 ? 's' : ''} al gasto real`)
+    } catch {
+      setItems(prev => prev.map(i => {
+        const orig = toMigrate.find(o => o.id === i.id)
+        return orig ? { ...i, gasto_real: orig.gasto_real, estado: orig.estado, precio_unitario: orig.precio_unitario } : i
+      }))
+      showError('Error al migrar los ítems')
+    } finally {
+      setMigrando(false)
+    }
+  }
+
+  function dismissMigration() {
+    try { localStorage.setItem(`kivo_migration_dialog_${proyecto.id}`, '1') } catch { /* ignore */ }
+    setShowMigrationDialog(false)
+  }
+
   // ── Column count helper ──────────────────────────────────────────────────────
 
   // Total columns including fixed ones
@@ -820,6 +864,28 @@ export function ProyectoDetailClient({
             <Button variant="outline" size="sm" onClick={() => setShowBulkDeleteDialog(false)}>Cancelar</Button>
             <Button size="sm" variant="destructive" onClick={deleteSelected} disabled={bulkOperating}>
               {bulkOperating ? 'Eliminando…' : 'Eliminar'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Migration dialog */}
+      <Dialog open={showMigrationDialog} onOpenChange={v => { if (!v) dismissMigration() }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>¿Copiar presupuesto a gasto real?</DialogTitle>
+            <DialogDescription className="text-zinc-500 text-sm mt-1">
+              El proyecto entra en ejecución. Hay{' '}
+              <strong>{items.filter(i => i.gasto_real === 0 && i.costo_estimado > 0).length} ítems</strong>{' '}
+              con costo presupuestado pero sin gasto real registrado.
+              <br /><br />
+              ¿Quieres copiar el costo presupuestado como punto de partida del gasto real? Podrás ajustar cada valor después.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={dismissMigration}>No, después</Button>
+            <Button size="sm" onClick={handleMigracion} disabled={migrando}>
+              {migrando ? 'Copiando…' : 'Sí, copiar presupuestados'}
             </Button>
           </div>
         </DialogContent>
@@ -1637,11 +1703,12 @@ function InlineSelect({ value, options, onSave }: { value: string; options: { va
 function ProveedorCombobox({ value, proveedores, onSave, onCreated }: {
   value: string; proveedores: Proveedor[]; onSave: (id: string) => void; onCreated: (p: Proveedor) => void
 }) {
-  const [search, setSearch]     = useState('')
-  const [creating, setCreating] = useState(false)
-  const [newRazon, setNewRazon] = useState('')
-  const [busy, setBusy]         = useState(false)
-  const ref                     = useRef<HTMLDivElement>(null)
+  const [search, setSearch]         = useState('')
+  const [crearOpen, setCrearOpen]   = useState(false)
+  const [crearRazon, setCrearRazon] = useState('')
+  const [busy, setBusy]             = useState(false)
+  const ref                         = useRef<HTMLDivElement>(null)
+  const crearOpenRef                = useRef(false)
 
   const filtered = proveedores.filter(p =>
     p.razon_social.toLowerCase().includes(search.toLowerCase()) ||
@@ -1649,54 +1716,83 @@ function ProveedorCombobox({ value, proveedores, onSave, onCreated }: {
   )
 
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onSave(value) }
-    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
+    const h = (e: MouseEvent) => {
+      if (!crearOpenRef.current && !ref.current?.contains(e.target as Node)) onSave(value)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
   }, [value, onSave])
 
   async function createProv() {
-    if (!newRazon.trim() || busy) return
+    if (!crearRazon.trim() || busy) return
     setBusy(true)
     try {
-      const res = await fetch('/api/proveedores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tipo: 'persona_natural', razon_social: newRazon.trim() }) })
-      if (res.ok) { const p = await res.json() as Proveedor; onCreated(p); onSave(p.id) }
+      const res = await fetch('/api/proveedores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tipo: 'persona_natural', razon_social: crearRazon.trim() }) })
+      if (res.ok) {
+        const p = await res.json() as Proveedor
+        onCreated(p)
+        onSave(p.id)
+        crearOpenRef.current = false
+        setCrearOpen(false)
+      }
     } finally { setBusy(false) }
   }
 
-  if (creating) return (
-    <div ref={ref} className="flex items-center gap-1">
-      <input autoFocus value={newRazon} onChange={e => setNewRazon(e.target.value)} placeholder="Razón social..."
-        className="flex-1 min-w-0 rounded border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-zinc-500"
-        onKeyDown={e => { if (e.key === 'Enter') createProv(); if (e.key === 'Escape') setCreating(false) }}
-      />
-      <button onClick={createProv} disabled={busy || !newRazon.trim()} className="rounded bg-zinc-900 px-2 py-1 text-xs text-white hover:bg-zinc-700 disabled:opacity-50">{busy ? '…' : 'Crear'}</button>
-      <button onClick={() => setCreating(false)} className="p-1 text-zinc-400 hover:text-zinc-600"><X size={12} /></button>
-    </div>
-  )
+  function closeCrear() {
+    crearOpenRef.current = false
+    setCrearOpen(false)
+    setCrearRazon('')
+  }
 
   return (
-    <div ref={ref} className="relative">
-      <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar…"
-        className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-zinc-500"
-        onKeyDown={e => { if (e.key === 'Escape') onSave(value) }}
-      />
-      <div className="absolute left-0 top-full z-50 mt-1 w-60 rounded-lg border border-zinc-200 bg-white shadow-xl overflow-hidden">
-        <button className="w-full px-3 py-2 text-left text-sm text-zinc-400 hover:bg-zinc-50 border-b border-zinc-100" onMouseDown={() => onSave('')}>— Sin proveedor</button>
-        <div className="max-h-44 overflow-y-auto">
-          {filtered.length === 0 && <p className="px-3 py-2 text-sm text-zinc-400">Sin resultados</p>}
-          {filtered.map(p => (
-            <button key={p.id} className={cn('w-full px-3 py-2 text-left text-sm hover:bg-zinc-50 flex items-center justify-between', value === p.id && 'bg-zinc-100')} onMouseDown={() => onSave(p.id)}>
-              <span className="truncate">{p.nombre_comercial ?? p.razon_social}</span>
-              {value === p.id && <Check size={12} className="shrink-0 ml-2 text-zinc-500" />}
+    <>
+      <div ref={ref} className="relative">
+        <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar…"
+          className="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm outline-none focus:border-zinc-500"
+          onKeyDown={e => { if (e.key === 'Escape') onSave(value) }}
+        />
+        <div className="absolute left-0 top-full z-50 mt-1 w-60 rounded-lg border border-zinc-200 bg-white shadow-xl overflow-hidden">
+          <button className="w-full px-3 py-2 text-left text-sm text-zinc-400 hover:bg-zinc-50 border-b border-zinc-100" onMouseDown={() => onSave('')}>— Sin proveedor</button>
+          <div className="max-h-44 overflow-y-auto">
+            {filtered.length === 0 && <p className="px-3 py-2 text-sm text-zinc-400">Sin resultados</p>}
+            {filtered.map(p => (
+              <button key={p.id} className={cn('w-full px-3 py-2 text-left text-sm hover:bg-zinc-50 flex items-center justify-between', value === p.id && 'bg-zinc-100')} onMouseDown={() => onSave(p.id)}>
+                <span className="truncate">{p.nombre_comercial ?? p.razon_social}</span>
+                {value === p.id && <Check size={12} className="shrink-0 ml-2 text-zinc-500" />}
+              </button>
+            ))}
+          </div>
+          <div className="border-t border-zinc-100">
+            <button className="w-full px-3 py-2 text-left text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-1.5"
+              onMouseDown={() => { crearOpenRef.current = true; setCrearRazon(search); setCrearOpen(true) }}>
+              <Plus size={12} /> Crear &ldquo;{search || 'nuevo proveedor'}&rdquo;
             </button>
-          ))}
-        </div>
-        <div className="border-t border-zinc-100">
-          <button className="w-full px-3 py-2 text-left text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-1.5" onMouseDown={() => { setCreating(true); setSearch('') }}>
-            <Plus size={12} /> Crear &ldquo;{search || 'nuevo proveedor'}&rdquo;
-          </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      <Dialog open={crearOpen} onOpenChange={v => { if (!v) closeCrear() }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Nuevo proveedor</DialogTitle>
+          </DialogHeader>
+          <div className="pt-1">
+            <label className="block text-xs font-medium text-zinc-500 mb-1">Razón social</label>
+            <input autoFocus value={crearRazon} onChange={e => setCrearRazon(e.target.value)}
+              placeholder="Razón social del proveedor..."
+              className="w-full rounded border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+              onKeyDown={e => { if (e.key === 'Enter') createProv() }}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="outline" size="sm" onClick={closeCrear}>Cancelar</Button>
+            <Button size="sm" onClick={createProv} disabled={!crearRazon.trim() || busy}>
+              {busy ? 'Creando…' : 'Crear proveedor'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

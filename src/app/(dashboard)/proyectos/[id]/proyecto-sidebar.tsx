@@ -181,12 +181,12 @@ function ClienteCombobox({ value, clientes, onSave, onCreated, disabled }: {
   onCreated: (c: ClienteData) => void
   disabled?: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [newNombre, setNewNombre] = useState('')
-  const [newRuc, setNewRuc] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [open, setOpen]           = useState(false)
+  const [search, setSearch]       = useState('')
+  const [crearOpen, setCrearOpen] = useState(false)
+  const [crearNombre, setCrearNombre] = useState('')
+  const [crearRuc, setCrearRuc]   = useState('')
+  const [busy, setBusy]           = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const current = clientes.find(c => c.id === value)
 
@@ -203,16 +203,20 @@ function ClienteCombobox({ value, clientes, onSave, onCreated, disabled }: {
   )
 
   async function createCliente() {
-    if (!newNombre.trim() || busy) return
+    if (!crearNombre.trim() || busy) return
     setBusy(true)
     try {
       const res = await fetch('/api/clientes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre: newNombre.trim(), ruc: newRuc.trim() || null }),
+        body: JSON.stringify({ nombre: crearNombre.trim(), ruc: crearRuc.trim() || null }),
       })
       if (res.ok) {
         const c = await res.json() as ClienteData
-        onCreated(c); onSave(c.id, c); setOpen(false); setCreating(false)
+        onCreated(c)
+        onSave(c.id, c)
+        setCrearOpen(false)
+        setCrearNombre('')
+        setCrearRuc('')
       }
     } finally { setBusy(false) }
   }
@@ -227,71 +231,85 @@ function ClienteCombobox({ value, clientes, onSave, onCreated, disabled }: {
   }
 
   return (
-    <div ref={ref} className="relative">
-      <button onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm hover:border-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-400"
-      >
-        <span className={cn('truncate text-left', !current && 'text-zinc-400 italic')}>
-          {current?.nombre ?? 'Seleccionar cliente…'}
-        </span>
-        <ChevronDown size={13} className="text-zinc-400 shrink-0" />
-      </button>
+    <>
+      <div ref={ref} className="relative">
+        <button onClick={() => setOpen(v => !v)}
+          className="w-full flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm hover:border-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        >
+          <span className={cn('truncate text-left', !current && 'text-zinc-400 italic')}>
+            {current?.nombre ?? 'Seleccionar cliente…'}
+          </span>
+          <ChevronDown size={13} className="text-zinc-400 shrink-0" />
+        </button>
 
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-lg border border-zinc-200 bg-white shadow-xl overflow-hidden">
-          {!creating ? (
-            <>
-              <div className="p-2 border-b border-zinc-100">
-                <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Buscar por nombre o RUC…"
-                  className="w-full rounded border border-zinc-200 px-2 py-1.5 text-xs outline-none focus:border-blue-400"
-                />
-              </div>
-              <div className="max-h-48 overflow-y-auto">
-                <button className="w-full px-3 py-2 text-left text-xs text-zinc-400 hover:bg-zinc-50 border-b border-zinc-100"
-                  onMouseDown={() => { onSave(null, null); setOpen(false) }}>
-                  — Sin cliente
+        {open && (
+          <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-lg border border-zinc-200 bg-white shadow-xl overflow-hidden">
+            <div className="p-2 border-b border-zinc-100">
+              <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar por nombre o RUC…"
+                className="w-full rounded border border-zinc-200 px-2 py-1.5 text-xs outline-none focus:border-blue-400"
+              />
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              <button className="w-full px-3 py-2 text-left text-xs text-zinc-400 hover:bg-zinc-50 border-b border-zinc-100"
+                onMouseDown={() => { onSave(null, null); setOpen(false) }}>
+                — Sin cliente
+              </button>
+              {filtered.map(c => (
+                <button key={c.id} onMouseDown={() => { onSave(c.id, c); setOpen(false) }}
+                  className={cn('w-full px-3 py-2 text-left text-sm hover:bg-zinc-50 flex items-center justify-between', value === c.id && 'bg-zinc-100')}>
+                  <div className="min-w-0">
+                    <span className="block truncate">{c.nombre}</span>
+                    {c.ruc && <span className="text-xs text-zinc-400 font-mono">{c.ruc}</span>}
+                  </div>
+                  {value === c.id && <Check size={12} className="text-zinc-500 shrink-0 ml-2" />}
                 </button>
-                {filtered.map(c => (
-                  <button key={c.id} onMouseDown={() => { onSave(c.id, c); setOpen(false) }}
-                    className={cn('w-full px-3 py-2 text-left text-sm hover:bg-zinc-50 flex items-center justify-between', value === c.id && 'bg-zinc-100')}>
-                    <div className="min-w-0">
-                      <span className="block truncate">{c.nombre}</span>
-                      {c.ruc && <span className="text-xs text-zinc-400 font-mono">{c.ruc}</span>}
-                    </div>
-                    {value === c.id && <Check size={12} className="text-zinc-500 shrink-0 ml-2" />}
-                  </button>
-                ))}
-                {filtered.length === 0 && <p className="px-3 py-2 text-xs text-zinc-400">Sin resultados</p>}
-              </div>
-              <div className="border-t border-zinc-100">
-                <button className="w-full px-3 py-2 text-left text-xs text-blue-600 hover:bg-blue-50 flex items-center gap-1.5"
-                  onMouseDown={() => { setCreating(true); setNewNombre(search); setSearch('') }}>
-                  <Plus size={11} /> Crear &ldquo;{search || 'nuevo cliente'}&rdquo;
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="p-3 space-y-2">
-              <p className="text-xs font-semibold text-zinc-700">Nuevo cliente</p>
-              <input autoFocus value={newNombre} onChange={e => setNewNombre(e.target.value)} placeholder="Nombre *"
-                className="w-full rounded border border-zinc-200 px-2 py-1.5 text-sm outline-none focus:border-blue-400"
+              ))}
+              {filtered.length === 0 && <p className="px-3 py-2 text-xs text-zinc-400">Sin resultados</p>}
+            </div>
+            <div className="border-t border-zinc-100">
+              <button className="w-full px-3 py-2 text-left text-xs text-blue-600 hover:bg-blue-50 flex items-center gap-1.5"
+                onMouseDown={() => { setOpen(false); setCrearNombre(search); setCrearOpen(true) }}>
+                <Plus size={11} /> Crear &ldquo;{search || 'nuevo cliente'}&rdquo;
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Create client Dialog — independent of dropdown state */}
+      <Dialog open={crearOpen} onOpenChange={v => { if (!v) { setCrearOpen(false); setCrearRuc('') } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Nuevo cliente</DialogTitle>
+            <DialogDescription className="sr-only">Crear un nuevo cliente</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 pt-1">
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1">Nombre *</label>
+              <input autoFocus value={crearNombre} onChange={e => setCrearNombre(e.target.value)}
+                placeholder="Nombre del cliente"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
                 onKeyDown={e => e.key === 'Enter' && createCliente()}
               />
-              <input value={newRuc} onChange={e => setNewRuc(e.target.value)} placeholder="RUC (opcional)"
-                className="w-full rounded border border-zinc-200 px-2 py-1.5 text-sm outline-none focus:border-blue-400"
-              />
-              <div className="flex gap-2">
-                <Button size="sm" className="flex-1" onClick={createCliente} disabled={!newNombre.trim() || busy}>
-                  {busy ? 'Creando…' : 'Crear'}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setCreating(false)}>Cancelar</Button>
-              </div>
             </div>
-          )}
-        </div>
-      )}
-    </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1">RUC (opcional)</label>
+              <input value={crearRuc} onChange={e => setCrearRuc(e.target.value)}
+                placeholder="20123456789"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-zinc-100">
+            <Button variant="outline" size="sm" onClick={() => setCrearOpen(false)}>Cancelar</Button>
+            <Button size="sm" onClick={createCliente} disabled={!crearNombre.trim() || busy}>
+              {busy ? 'Creando…' : 'Crear cliente'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
