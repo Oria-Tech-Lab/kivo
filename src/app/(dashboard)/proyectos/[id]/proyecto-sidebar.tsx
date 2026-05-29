@@ -720,8 +720,9 @@ export function ProyectoSidebar({
   const total         = baseImponible + igvMonto
   const detMonto      = proyecto.aplica_detraccion_venta ? Math.round(total * proyecto.pct_detraccion_venta / 100) : 0
   const clienteAbona  = total - detMonto
-  const margenNeto    = clienteAbona - totalGastos
-  const margenPct     = clienteAbona > 0 ? (margenNeto / clienteAbona) * 100 : null
+  // Margen sobre base imponible (sin IGV — el IGV es un impuesto, no ganancia)
+  const margenNeto    = baseImponible - totalGastos
+  const margenPct     = baseImponible > 0 ? (margenNeto / baseImponible) * 100 : null
 
   // Facturas resumen
   const totalFacturado    = facturas.reduce((s, f) => s + f.subtotal, 0)
@@ -1145,27 +1146,29 @@ export function ProyectoSidebar({
               {clienteAbona > 0 ? formatMoney(clienteAbona) : '—'}
             </span>
           </div>
-
-          {/* Margen neto */}
-          {(clienteAbona > 0 || totalGastos > 0) && (
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-400">Margen neto</span>
-              <span className={cn(
-                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
-                margenPct === null ? 'bg-zinc-100 text-zinc-400'
-                : margenPct >= 30 ? 'bg-emerald-100 text-emerald-700'
-                : margenPct >= 15 ? 'bg-amber-100 text-amber-700'
-                : 'bg-red-100 text-red-700',
-              )}>
-                {margenPct !== null ? `${margenPct.toFixed(0)}%` : '—'}
-                {' · '}
-                <span className="font-mono font-normal opacity-75">
-                  {margenNeto >= 0 ? '+' : ''}{formatMoney(margenNeto)}
-                </span>
-              </span>
-            </div>
-          )}
         </div>
+
+        {/* Margen neto — calculado sobre base imponible, sin IGV */}
+        {(baseImponible > 0 || totalGastos > 0) && (
+          <div className="mt-3 pt-3 border-t border-dashed border-zinc-200 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-medium text-zinc-500">Margen neto</span>
+              <p className="text-[10px] text-zinc-400">sobre base imponible, sin IGV</p>
+            </div>
+            <span className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
+              margenPct === null ? 'bg-zinc-100 text-zinc-400'
+              : margenPct >= 30 ? 'bg-emerald-100 text-emerald-700'
+              : margenPct >= 15 ? 'bg-amber-100 text-amber-700'
+              : 'bg-red-100 text-red-700',
+            )}>
+              <span className="font-mono">{margenNeto >= 0 ? '+' : ''}{formatMoney(margenNeto)}</span>
+              {margenPct !== null && (
+                <span className="font-normal opacity-75">· {margenPct.toFixed(0)}%</span>
+              )}
+            </span>
+          </div>
+        )}
       </div>
 
       <Separator />

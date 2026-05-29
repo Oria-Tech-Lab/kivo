@@ -58,8 +58,8 @@ const ESTADO_PAGO_CONFIG: Record<string, { label: string; cls: string }> = {
 
 // ─── Column definitions ────────────────────────────────────────────────────────
 
-type ColKey = 'cantidad' | 'unidad' | 'proveedor' | 'tipo_comp' | 'varianza' | 'precio_venta' | 'margen' | 'igv' | 'estado_pago'
-const ALL_OPTIONAL_COLS: ColKey[] = ['cantidad', 'unidad', 'proveedor', 'tipo_comp', 'varianza', 'precio_venta', 'margen', 'igv', 'estado_pago']
+type ColKey = 'cantidad' | 'unidad' | 'proveedor' | 'tipo_comp' | 'varianza' | 'precio_venta' | 'margen_s' | 'margen' | 'igv' | 'estado_pago'
+const ALL_OPTIONAL_COLS: ColKey[] = ['cantidad', 'unidad', 'proveedor', 'tipo_comp', 'varianza', 'precio_venta', 'margen_s', 'margen', 'igv', 'estado_pago']
 const COL_LABELS: Record<ColKey, string> = {
   cantidad:     'Cantidad',
   unidad:       'Unidad',
@@ -67,13 +67,14 @@ const COL_LABELS: Record<ColKey, string> = {
   tipo_comp:    'Tipo comp.',
   varianza:     'Varianza S/',
   precio_venta: 'P. Venta',
-  margen:       'Margen',
+  margen_s:     'Margen S/',
+  margen:       'Margen %',
   igv:          'IGV',
   estado_pago:  'Estado pago',
 }
 
 type SortDir = 'asc' | 'desc'
-type SortableCol = 'costo_estimado' | 'gasto_real' | 'varianza' | 'precio_venta' | 'margen' | 'igv'
+type SortableCol = 'costo_estimado' | 'gasto_real' | 'varianza' | 'precio_venta' | 'margen_s' | 'margen' | 'igv'
 
 // ─── Item Status ───────────────────────────────────────────────────────────────
 
@@ -348,7 +349,8 @@ export function ProyectoDetailClient({
           case 'gasto_real':     return item.gasto_real
           case 'varianza':       return item.costo_estimado > 0 ? item.gasto_real - item.costo_estimado : -Infinity
           case 'precio_venta':   return item.precio_venta
-          case 'margen':         return item.precio_venta - item.costo_estimado
+          case 'margen_s':       return item.precio_venta - item.costo_estimado
+          case 'margen':         return item.precio_venta > 0 && item.costo_estimado > 0 ? ((item.precio_venta - item.costo_estimado) / item.precio_venta) * 100 : -Infinity
           case 'igv':            return item.tipo_comprobante === 'factura' ? Math.round(item.gasto_real * 0.18) : 0
           default: return 0
         }
@@ -584,7 +586,7 @@ export function ProyectoDetailClient({
     (canEditRow ? 1 : 0) /* checkbox */ +
     (show('cantidad') ? 1 : 0) + (show('unidad') ? 1 : 0) + (show('proveedor') ? 1 : 0) +
     (show('tipo_comp') ? 1 : 0) + (show('varianza') ? 1 : 0) + (show('precio_venta') ? 1 : 0) +
-    (show('margen') ? 1 : 0) + (show('igv') ? 1 : 0) + (show('estado_pago') ? 1 : 0) +
+    (show('margen_s') ? 1 : 0) + (show('margen') ? 1 : 0) + (show('igv') ? 1 : 0) + (show('estado_pago') ? 1 : 0) +
     (canEditRow ? 1 : 0) /* actions */
 
   // ── KPI cards ────────────────────────────────────────────────────────────────
@@ -941,7 +943,8 @@ export function ProyectoDetailClient({
                     {show('varianza') && <SortHeader col="varianza" label="Varianza S/" sort={sortState} onSort={cycleSort} className="w-24" />}
                     <th className="px-3 py-2.5 text-left w-32">Estado ítem</th>
                     {show('precio_venta') && <SortHeader col="precio_venta" label="P. Venta" sort={sortState} onSort={cycleSort} className="w-28" />}
-                    {show('margen') && <SortHeader col="margen" label="Margen" sort={sortState} onSort={cycleSort} className="w-24" />}
+                    {show('margen_s') && <SortHeader col="margen_s" label="Margen S/" sort={sortState} onSort={cycleSort} className="w-24" />}
+                    {show('margen') && <SortHeader col="margen" label="Margen %" sort={sortState} onSort={cycleSort} className="w-20" />}
                     {show('igv') && <SortHeader col="igv" label="IGV" sort={sortState} onSort={cycleSort} className="w-24" />}
                     {show('estado_pago') && <th className="px-3 py-2.5 text-left w-32">Estado pago</th>}
                     {canEditRow && <th className="px-3 py-2.5 w-16" />}
@@ -1008,6 +1011,11 @@ export function ProyectoDetailClient({
                       {show('precio_venta') && (
                         <td className="px-3 py-3 text-right font-bold tabular-nums text-zinc-800 text-sm">
                           {totals.precio_venta > 0 ? formatMoney(totals.precio_venta) : '—'}
+                        </td>
+                      )}
+                      {show('margen_s') && (
+                        <td className={cn('px-3 py-3 text-right font-bold tabular-nums text-sm', totals.margen < 0 ? 'text-red-600' : totals.margen > 0 ? 'text-emerald-700' : 'text-zinc-400')}>
+                          {totals.precio_venta > 0 || totals.costo_estimado > 0 ? formatMoney(totals.margen) : '—'}
                         </td>
                       )}
                       {show('margen') && (
@@ -1344,14 +1352,27 @@ function ItemRow({
         </td>
       )}
 
-      {/* Margen = precio_venta − costo_estimado */}
-      {show('margen') && (
+      {/* Margen S/ = precio_venta − costo_estimado */}
+      {show('margen_s') && (
         <td className="px-3 py-2.5 text-right">
-          {item.precio_venta === 0 || item.costo_estimado === 0 ? (
+          {item.precio_venta === 0 && item.costo_estimado === 0 ? (
             <span className="text-sm text-zinc-300">—</span>
           ) : (
-            <span className={cn('text-sm tabular-nums font-medium', margenRowPct !== null && margenRowPct < 0 ? 'text-red-600' : margenAmt < 0 ? 'text-red-600' : 'text-emerald-700')}>
-              {margenRowPct !== null ? `${margenRowPct.toFixed(0)}%` : formatMoney(margenAmt)}
+            <span className={cn('text-sm tabular-nums font-medium', margenAmt >= 0 ? 'text-emerald-700' : 'text-red-600')}>
+              {formatMoney(margenAmt)}
+            </span>
+          )}
+        </td>
+      )}
+
+      {/* Margen % */}
+      {show('margen') && (
+        <td className="px-3 py-2.5 text-right">
+          {margenRowPct === null ? (
+            <span className="text-sm text-zinc-300">—</span>
+          ) : (
+            <span className={cn('text-sm tabular-nums font-medium', margenRowPct < 0 ? 'text-red-600' : 'text-emerald-700')}>
+              {margenRowPct.toFixed(0)}%
             </span>
           )}
         </td>
