@@ -144,6 +144,15 @@ export function ProyectoDetailClient({
   const [showFinalizarDialog, setShowFinalizarDialog] = useState(false)
   const [finalizando, setFinalizando] = useState(false)
   const [editingSheet, setEditingSheet] = useState<ProyectoItem | null>(null)
+  const [kpiView, setKpiView] = useState<'presupuesto' | 'real'>(() => {
+    if (typeof window === 'undefined') return 'presupuesto'
+    try { return (localStorage.getItem('kivo_project_kpi_view') as 'presupuesto' | 'real' | null) ?? 'presupuesto' } catch { return 'presupuesto' }
+  })
+
+  function switchKpiView(v: 'presupuesto' | 'real') {
+    setKpiView(v)
+    try { localStorage.setItem('kivo_project_kpi_view', v) } catch { /* ignore */ }
+  }
 
   // Sort state
   const [sortState, setSortState] = useState<{ col: SortableCol; dir: SortDir } | null>(null)
@@ -218,10 +227,9 @@ export function ProyectoDetailClient({
     }
   }, { costo_estimado: 0, gasto_real: 0, precio_venta: 0, igv: 0, margen: 0, varianza: 0 })
 
-  const avancePct        = totals.costo_estimado > 0 ? Math.min((totals.gasto_real / totals.costo_estimado) * 100, 999) : null
-  const margenPct        = totals.precio_venta > 0 ? (totals.margen / totals.precio_venta) * 100 : null
-  const margenSobreCosto = totals.gasto_real > 0 ? (totals.margen / totals.gasto_real) * 100 : null
-  const varianzaPct      = totals.costo_estimado > 0 ? (totals.varianza / totals.costo_estimado) * 100 : null
+  const avancePct   = totals.costo_estimado > 0 ? Math.min((totals.gasto_real / totals.costo_estimado) * 100, 999) : null
+  const margenPct   = totals.precio_venta > 0 ? (totals.margen / totals.precio_venta) * 100 : null
+  const varianzaPct = totals.costo_estimado > 0 ? (totals.varianza / totals.costo_estimado) * 100 : null
 
   const statusCounts = items.reduce((acc, item) => {
     const s = getItemStatus(item); acc[s] = (acc[s] ?? 0) + 1; return acc
@@ -435,84 +443,127 @@ export function ProyectoDetailClient({
 
   // ── KPI cards ────────────────────────────────────────────────────────────────
 
-  const igvCredito = totals.igv  // IGV crédito fiscal (de facturas de gasto)
-  const igvDebito  = initialFacturas.reduce((s, f) => s + f.igv, 0)  // IGV débito (facturas emitidas al cliente)
-  const igvNeto    = igvDebito - igvCredito  // positivo = a pagar SUNAT, negativo = saldo a favor
+  const totalCotizado     = proyecto.subtotal_proyecto > 0 ? proyecto.subtotal_proyecto : totals.precio_venta
+  const margenEstimadoMto = totalCotizado - totals.costo_estimado
+  const margenEstimadoPct = totalCotizado > 0 ? (margenEstimadoMto / totalCotizado) * 100 : null
+  const varianzaAhorro    = totals.costo_estimado - totals.gasto_real  // positive = ahorro
+  const margenRealMto     = totalCotizado - totals.gasto_real
+  const margenRealPct     = totalCotizado > 0 ? (margenRealMto / totalCotizado) * 100 : null
+  const igvReal           = totals.igv
 
   const kpiCards = (
-    <div className="grid gap-4 grid-cols-2 xl:grid-cols-4">
-      {/* Presupuestado */}
-      <KpiCard
-        label="Presupuestado" icon={<FileText size={15} className="text-zinc-400" />}
-        value={totals.costo_estimado > 0 ? formatMoney(totals.costo_estimado) : '—'}
-        sub={avancePct !== null ? `${avancePct.toFixed(0)}% ejecutado` : 'Sin ítems aún'}
-        progress={avancePct !== null ? Math.min(avancePct, 100) : undefined}
-        progressColor={avancePct && avancePct > 100 ? 'bg-red-500' : 'bg-blue-500'}
-        detail={totals.gasto_real > 0 && totals.costo_estimado > 0 ? (
-          <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
-            Real: <span className="font-medium text-zinc-600 font-mono">{formatMoney(totals.gasto_real)}</span>
-            {' '}de{' '}
-            <span className="font-mono">{formatMoney(totals.costo_estimado)}</span>
-          </p>
-        ) : undefined}
-      />
+    <div>
+      {/* Toggle */}
+      <div className="flex items-center justify-end mb-4">
+        <div className="flex rounded-lg border border-zinc-200 p-0.5 bg-zinc-50 gap-0.5">
+          {(['presupuesto', 'real'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => switchKpiView(v)}
+              className={cn(
+                'px-3 py-1.5 text-xs font-medium rounded-md transition-all',
+                kpiView === v
+                  ? 'bg-white shadow-sm text-zinc-900 border border-zinc-200'
+                  : 'text-zinc-500 hover:text-zinc-700',
+              )}
+            >
+              {v === 'presupuesto' ? 'Presupuesto' : 'Ejecución Real'}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {/* Gastado Real */}
-      <KpiCard
-        label="Gastado (Real)" icon={<Wallet size={15} className="text-zinc-400" />}
-        value={totals.gasto_real > 0 ? formatMoney(totals.gasto_real) : '—'}
-        sub={avancePct !== null ? `${avancePct.toFixed(0)}% del presupuesto` : 'Sin gastos aún'}
-        progress={avancePct !== null ? Math.min(avancePct, 100) : undefined}
-        progressColor={avancePct && avancePct > 100 ? 'bg-red-500' : 'bg-blue-500'}
-        detail={totals.costo_estimado > 0 ? (
-          <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
-            De <span className="font-mono">{formatMoney(totals.costo_estimado)}</span> presupuestados
-          </p>
-        ) : undefined}
-      />
+      {/* Group: Presupuesto */}
+      {kpiView === 'presupuesto' && (
+        <div key="presupuesto" className="grid gap-4 grid-cols-2 xl:grid-cols-4 animate-in fade-in duration-150">
+          <KpiCard
+            label="Total cotizado" icon={<FileText size={15} className="text-zinc-400" />}
+            value={totalCotizado > 0 ? formatMoney(totalCotizado) : '—'}
+            sub="Propuesta al cliente"
+          />
+          <KpiCard
+            label="Costo estimado" icon={<Wallet size={15} className="text-zinc-400" />}
+            value={totals.costo_estimado > 0 ? formatMoney(totals.costo_estimado) : '—'}
+            sub="Suma de ítems presupuestados"
+          />
+          <KpiCard
+            label="Margen estimado S/"
+            icon={<TrendingUp size={15} className={margenEstimadoMto >= 0 ? 'text-emerald-500' : 'text-red-500'} />}
+            value={totalCotizado > 0 || totals.costo_estimado > 0 ? formatMoney(margenEstimadoMto) : '—'}
+            sub={margenEstimadoPct !== null ? `${margenEstimadoPct.toFixed(1)}% sobre el cotizado` : 'Sin datos'}
+            cardBg={margenEstimadoMto >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}
+          />
+          <KpiCard
+            label="Margen estimado %"
+            icon={<BarChart3 size={15} className={
+              margenEstimadoPct === null ? 'text-zinc-400'
+              : margenEstimadoPct < 15    ? 'text-red-500'
+              : margenEstimadoPct < 30    ? 'text-amber-500'
+              : 'text-emerald-500'
+            } />}
+            value={margenEstimadoPct !== null ? `${margenEstimadoPct.toFixed(1)}%` : '—'}
+            sub={margenEstimadoPct !== null
+              ? margenEstimadoPct >= 30 ? 'Margen saludable'
+              : margenEstimadoPct >= 15 ? 'Margen ajustado'
+              : 'Margen en riesgo'
+              : 'Sin datos suficientes'
+            }
+            progress={margenEstimadoPct !== null ? Math.max(0, Math.min(margenEstimadoPct, 100)) : undefined}
+            progressColor={
+              margenEstimadoPct === null ? 'bg-zinc-300'
+              : margenEstimadoPct < 0   ? 'bg-red-500'
+              : margenEstimadoPct < 15  ? 'bg-red-400'
+              : margenEstimadoPct < 30  ? 'bg-amber-400'
+              : 'bg-emerald-500'
+            }
+            cardBg={
+              margenEstimadoPct === null ? ''
+              : margenEstimadoPct < 15   ? 'bg-red-50 border-red-200'
+              : margenEstimadoPct < 30   ? 'bg-amber-50 border-amber-200'
+              : 'bg-emerald-50 border-emerald-200'
+            }
+          />
+        </div>
+      )}
 
-      {/* Margen Bruto */}
-      <KpiCard
-        label="Margen Bruto"
-        icon={<TrendingUp size={15} className={margenSobreCosto === null ? 'text-zinc-400' : margenSobreCosto < 15 ? 'text-red-500' : margenSobreCosto < 30 ? 'text-amber-500' : 'text-emerald-500'} />}
-        value={totals.precio_venta > 0 || totals.gasto_real > 0 ? formatMoney(totals.margen) : '—'}
-        sub={margenSobreCosto !== null ? `${margenSobreCosto.toFixed(1)}% sobre costo` : 'Sin datos suficientes'}
-        progress={margenSobreCosto !== null ? Math.max(0, Math.min(margenSobreCosto, 100)) : undefined}
-        progressColor={margenSobreCosto === null ? 'bg-zinc-300' : margenSobreCosto < 0 ? 'bg-red-500' : margenSobreCosto < 15 ? 'bg-red-400' : margenSobreCosto < 30 ? 'bg-amber-400' : 'bg-emerald-500'}
-        cardBg={margenSobreCosto === null ? '' : margenSobreCosto < 15 ? 'bg-red-50 border-red-200' : margenSobreCosto < 30 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}
-        detail={totals.gasto_real > 0 ? (
-          <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
-            De <span className="font-mono">{formatMoney(totals.gasto_real)}</span> en costos
-          </p>
-        ) : undefined}
-      />
-
-      {/* Posición IGV */}
-      <KpiCard
-        label="Posición IGV" icon={<BarChart3 size={15} className="text-zinc-400" />}
-        value={igvCredito > 0 ? formatMoney(igvCredito) : '—'}
-        sub={igvCredito > 0 ? 'IGV crédito fiscal (gastos)' : 'Sin facturas de gasto'}
-        progress={igvCredito > 0 && igvDebito > 0 ? Math.min((igvCredito / igvDebito) * 100, 100) : igvCredito > 0 ? 100 : undefined}
-        progressColor="bg-amber-400"
-        detail={(igvCredito > 0 || igvDebito > 0) ? (
-          <div className="mt-1 space-y-0.5 text-[11px] tabular-nums">
-            {igvDebito > 0 && (
-              <p className="text-zinc-400">
-                Débito (ventas): <span className="font-mono font-medium text-zinc-600">{formatMoney(igvDebito)}</span>
-              </p>
-            )}
-            {(igvCredito > 0 || igvDebito > 0) && (
-              <p className={cn('font-semibold', igvNeto > 0 ? 'text-red-600' : igvNeto < 0 ? 'text-emerald-600' : 'text-zinc-400')}>
-                {igvNeto > 0
-                  ? `A pagar SUNAT: ${formatMoney(igvNeto)}`
-                  : igvNeto < 0
-                  ? `Saldo a favor: ${formatMoney(Math.abs(igvNeto))}`
-                  : 'Posición neutra'}
-              </p>
-            )}
-          </div>
-        ) : undefined}
-      />
+      {/* Group: Ejecución Real */}
+      {kpiView === 'real' && (
+        <div key="real" className="grid gap-4 grid-cols-2 xl:grid-cols-4 animate-in fade-in duration-150">
+          <KpiCard
+            label="Gastado real" icon={<Wallet size={15} className="text-zinc-400" />}
+            value={totals.gasto_real > 0 ? formatMoney(totals.gasto_real) : '—'}
+            sub={avancePct !== null ? `${avancePct.toFixed(0)}% del presupuesto ejecutado` : 'Sin gastos aún'}
+            progress={avancePct !== null ? Math.min(avancePct, 100) : undefined}
+            progressColor={avancePct && avancePct > 100 ? 'bg-red-500' : 'bg-blue-500'}
+          />
+          <KpiCard
+            label="Varianza"
+            icon={<TrendingUp size={15} className={varianzaAhorro >= 0 ? 'text-emerald-500' : 'text-red-500'} />}
+            value={totals.costo_estimado > 0 ? formatMoney(Math.abs(varianzaAhorro)) : '—'}
+            sub={totals.costo_estimado > 0
+              ? varianzaAhorro > 0 ? `Ahorro de ${formatMoney(varianzaAhorro)}`
+              : varianzaAhorro < 0 ? `Sobregasto de ${formatMoney(Math.abs(varianzaAhorro))}`
+              : 'Sin varianza'
+              : 'vs costo presupuestado'
+            }
+            cardBg={totals.costo_estimado === 0 ? '' : varianzaAhorro >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}
+          />
+          <KpiCard
+            label="Margen real S/"
+            icon={<TrendingUp size={15} className={margenRealMto >= 0 ? 'text-emerald-500' : 'text-red-500'} />}
+            value={totalCotizado > 0 || totals.gasto_real > 0 ? formatMoney(margenRealMto) : '—'}
+            sub={margenRealPct !== null ? `${margenRealPct.toFixed(1)}% actual` : 'Sin datos'}
+            cardBg={margenRealMto >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}
+          />
+          <KpiCard
+            label="IGV real" icon={<BarChart3 size={15} className="text-zinc-400" />}
+            value={igvReal > 0 ? formatMoney(igvReal) : '—'}
+            sub="Crédito fiscal acumulado"
+            progress={igvReal > 0 ? 100 : undefined}
+            progressColor="bg-amber-400"
+          />
+        </div>
+      )}
     </div>
   )
 
