@@ -16,12 +16,15 @@ export interface ProyectoOpt {
 export interface RawMovR { tipo: string; monto: number; fecha_real: string | null }
 export interface RawMovP { tipo: string; monto: number; fecha_esperada: string | null }
 export interface RawProyecto {
-  id: string; nombre: string; tipo: string; estado: string
+  id: string; nombre: string; tipo: string; estado: string; fase: string | null
   fecha_inicio: string | null
   cliente: { id: string; nombre: string } | null
 }
 export interface RawItem { proyecto_id: string; precio_venta: number; gasto_real: number }
-export interface RawGasto { neto_a_pagar: number | null; fecha_comprobante: string | null }
+export interface RawGasto {
+  neto_a_pagar: number | null; fecha_comprobante: string | null; estado_pago: string | null
+}
+export interface RawFacturaProyecto { proyecto_id: string; subtotal: number; estado: string }
 
 export interface ChartDataPoint { mes: string; ingresos: number; gastos: number }
 export interface KpiData {

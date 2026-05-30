@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn, formatMoney } from '@/lib/utils'
 import type {
   AlertaItem, ClienteOpt, ProveedorOpt, ProyectoOpt,
-  RawMovR, RawMovP, RawProyecto, RawItem, RawGasto,
+  RawMovR, RawMovP, RawProyecto, RawItem, RawGasto, RawFacturaProyecto,
   ChartDataPoint, KpiData, ProyectoRentabilidad, DistribucionItem, SaludData,
 } from './types'
 import { TIPO_CFG } from './types'
@@ -52,6 +52,7 @@ interface Props {
   movRealizadosRaw: RawMovR[]
   movPendientesRaw: RawMovP[]
   gastosChartRaw: RawGasto[]
+  facturasRaw: RawFacturaProyecto[]
   limaYear: number
   limaMonth: number  // 0-indexed
   todayStr: string
@@ -294,6 +295,67 @@ function computeKpis(
     porCobrar, porCobrarCount, porPagar, porPagarCount,
     flujoNeto, flujoProyectado, metaMensualPct,
     reduccionGastosPct, varPorCobrarPct,
+  }
+}
+
+// ── New KPI computation (project + invoice based) ────────────────────────────
+
+interface NewKpis {
+  totalVendido: number; totalVendidoCount: number
+  porCobrarFacturas: number; porCobrarFacturasCount: number
+  proyectosActivos: number; proyectosActivosCartera: number
+  porPagarGastos: number; porPagarGastosCount: number
+  flujoNetoMes: number
+  flujoProyectado30d: number
+}
+
+function computeNewKpis(
+  proyectos: RawProyecto[],
+  itemsByProy: Record<string, { pv: number; gr: number }>,
+  facturas: RawFacturaProyecto[],
+  gastos: RawGasto[],
+  movRealizados: RawMovR[],
+  movPendientes: RawMovP[],
+  limaYear: number,
+  limaMonth: number,
+  todayStr: string,
+): NewKpis {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const mesKey = `${limaYear}-${pad(limaMonth + 1)}`
+  const thirtyDaysLater = new Date(new Date(todayStr).getTime() + 30 * 86400000).toISOString().split('T')[0]
+
+  // Card 1: Total vendido — proyectos en ejecucion o finalizado
+  const vendidos = proyectos.filter(p => p.fase === 'ejecucion' || p.fase === 'finalizado')
+  const totalVendido = vendidos.reduce((s, p) => s + (itemsByProy[p.id]?.pv ?? 0), 0)
+
+  // Card 2: Por cobrar — facturas emitidas o borrador
+  const factPendientes = facturas.filter(f => f.estado === 'emitida' || f.estado === 'borrador')
+  const porCobrarFacturas = factPendientes.reduce((s, f) => s + f.subtotal, 0)
+
+  // Card 3: Proyectos activos
+  const activos = proyectos.filter(p => p.estado === 'activo')
+  const proyectosActivosCartera = activos.reduce((s, p) => s + (itemsByProy[p.id]?.pv ?? 0), 0)
+
+  // Card 4: Por pagar — gastos pendientes
+  const gastosPendientes = gastos.filter(g => g.estado_pago === 'pendiente')
+  const porPagarGastos = gastosPendientes.reduce((s, g) => s + (g.neto_a_pagar ?? 0), 0)
+
+  // Card 5: Flujo neto real (este mes, movimientos realizados)
+  const flujoNetoMes = movRealizados
+    .filter(m => m.fecha_real?.startsWith(mesKey))
+    .reduce((s, m) => s + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0)
+
+  // Card 6: Flujo proyectado 30d
+  const flujoProyectado30d = movPendientes
+    .filter(m => m.fecha_esperada && m.fecha_esperada >= todayStr && m.fecha_esperada <= thirtyDaysLater)
+    .reduce((s, m) => s + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0)
+
+  return {
+    totalVendido, totalVendidoCount: vendidos.length,
+    porCobrarFacturas, porCobrarFacturasCount: factPendientes.length,
+    proyectosActivos: activos.length, proyectosActivosCartera,
+    porPagarGastos, porPagarGastosCount: gastosPendientes.length,
+    flujoNetoMes, flujoProyectado30d,
   }
 }
 
@@ -554,14 +616,22 @@ function FilterBar({
 
 // ── KPI Card ──────────────────────────────────────────────────────────────────
 
-function KpiCard({ title, value, sub, varPct, varPositiveIsBad = false, valueColor }: {
+function KpiCard({ title, value, sub, varPct, varPositiveIsBad = false, valueColor, onClick }: {
   title: string; value: string; sub: string
   varPct?: number | null; varPositiveIsBad?: boolean; valueColor?: string
+  onClick?: () => void
 }) {
   const isPositive = varPct != null && varPct >= 0
   const badgeGreen = varPositiveIsBad ? !isPositive : isPositive
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-5">
+    <div
+      className={cn(
+        'rounded-xl border border-zinc-200 bg-white p-5 transition-all',
+        onClick && 'cursor-pointer hover:border-zinc-300 hover:shadow-sm',
+      )}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+    >
       <div className="flex items-start justify-between mb-2">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{title}</p>
         {varPct != null && (
@@ -888,8 +958,10 @@ function SaludCard({ data }: { data: SaludData }) {
 export function InicioClient({
   saludo, nombre, alertas, clientes, proveedores, proyectosOpts,
   proyectosRaw, itemsRaw, movRealizadosRaw, movPendientesRaw, gastosChartRaw,
+  facturasRaw,
   limaYear, limaMonth, todayStr,
 }: Props) {
+  const router = useRouter()
   const [gastoSheetOpen,     setGastoSheetOpen]     = useState(false)
   const [proyectoDialogOpen, setProyectoDialogOpen] = useState(false)
   const [filters, setFilters] = useState<DashboardFilters>(DEFAULT_FILTERS)
@@ -954,12 +1026,17 @@ export function InicioClient({
     [proyectosRaw, itemsByProy, kpis.flujoNeto, alertas],
   )
 
+  const newKpis = useMemo(
+    () => computeNewKpis(
+      proyectosRaw, itemsByProy, facturasRaw, gastosChartRaw,
+      movRealizadosRaw, movPendientesRaw, limaYear, limaMonth, todayStr,
+    ),
+    [proyectosRaw, itemsByProy, facturasRaw, gastosChartRaw, movRealizadosRaw, movPendientesRaw, limaYear, limaMonth, todayStr],
+  )
+
   // ── Render ───────────────────────────────────────────────────────────────
 
-  const flujoNetoColor =
-    kpis.flujoNeto > 0 ? '#2563eb'
-    : kpis.flujoNeto < 0 ? '#dc2626'
-    : '#71717a'
+
 
   return (
     <div className="p-6 space-y-5 max-w-[1400px]">
@@ -986,35 +1063,57 @@ export function InicioClient({
       {/* ── Filter bar ──────────────────────────────────────────────────── */}
       <FilterBar filters={filters} onChange={updateFilters} clientes={clientes} />
 
-      {/* ── KPI Cards ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── KPI Cards — 2 filas de 3 ────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Fila 1 — Ingresos y ventas */}
+        <KpiCard
+          title="Total vendido"
+          value={formatMoney(newKpis.totalVendido)}
+          sub={`${newKpis.totalVendidoCount} proyecto${newKpis.totalVendidoCount !== 1 ? 's' : ''} con propuesta aceptada`}
+          onClick={() => router.push('/proyectos')}
+        />
         <KpiCard
           title="Por cobrar"
-          value={formatMoney(kpis.porCobrar)}
-          sub={`${kpis.porCobrarCount} factura${kpis.porCobrarCount !== 1 ? 's' : ''} pendiente${kpis.porCobrarCount !== 1 ? 's' : ''} de cobro`}
-          varPct={kpis.varPorCobrarPct}
-          varPositiveIsBad={false}
+          value={formatMoney(newKpis.porCobrarFacturas)}
+          sub={`${newKpis.porCobrarFacturasCount} factura${newKpis.porCobrarFacturasCount !== 1 ? 's' : ''} pendiente${newKpis.porCobrarFacturasCount !== 1 ? 's' : ''} de cobro`}
+          valueColor="#2563eb"
+          onClick={() => router.push('/facturas?estado=emitida')}
         />
         <KpiCard
-          title="Flujo proyectado"
-          value={formatMoney(kpis.flujoProyectado)}
-          sub={`Meta mensual: ${kpis.metaMensualPct}% alcanzado`}
+          title="Proyectos activos"
+          value={String(newKpis.proyectosActivos)}
+          sub={`${formatMoney(newKpis.proyectosActivosCartera)} en cartera activa`}
+          onClick={() => router.push('/proyectos')}
         />
+        {/* Fila 2 — Egresos y flujo */}
         <KpiCard
           title="Por pagar"
-          value={formatMoney(kpis.porPagar)}
-          sub={
-            kpis.reduccionGastosPct !== null
-              ? `${kpis.reduccionGastosPct > 0 ? 'Reducción' : 'Aumento'} en gastos: ${Math.abs(kpis.reduccionGastosPct)}%`
-              : `${kpis.porPagarCount} pago${kpis.porPagarCount !== 1 ? 's' : ''} pendiente${kpis.porPagarCount !== 1 ? 's' : ''}`
-          }
-          varPositiveIsBad
+          value={formatMoney(newKpis.porPagarGastos)}
+          sub={`${newKpis.porPagarGastosCount} gasto${newKpis.porPagarGastosCount !== 1 ? 's' : ''} pendiente${newKpis.porPagarGastosCount !== 1 ? 's' : ''} de pago`}
+          valueColor="#d97706"
+          onClick={() => router.push('/gastos?estado=pendiente')}
         />
         <KpiCard
           title="Flujo neto real"
-          value={formatMoney(Math.abs(kpis.flujoNeto))}
-          sub="Liquidez disponible inmediata"
-          valueColor={flujoNetoColor}
+          value={formatMoney(Math.abs(newKpis.flujoNetoMes))}
+          sub="Ingresos cobrados − gastos pagados este mes"
+          valueColor={
+            newKpis.flujoNetoMes > 0 ? '#2563eb'
+            : newKpis.flujoNetoMes < 0 ? '#dc2626'
+            : '#71717a'
+          }
+          onClick={() => router.push('/caja')}
+        />
+        <KpiCard
+          title="Flujo proyectado 30d"
+          value={formatMoney(Math.abs(newKpis.flujoProyectado30d))}
+          sub="Estimado próximos 30 días"
+          valueColor={
+            newKpis.flujoProyectado30d > 0 ? '#2563eb'
+            : newKpis.flujoProyectado30d < 0 ? '#dc2626'
+            : '#71717a'
+          }
+          onClick={() => router.push('/caja?vista=proyectado')}
         />
       </div>
 

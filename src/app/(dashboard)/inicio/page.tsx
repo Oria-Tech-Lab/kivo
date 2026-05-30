@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { InicioClient } from './inicio-client'
 import type {
   AlertaItem, ClienteOpt, ProveedorOpt, ProyectoOpt,
-  RawMovR, RawMovP, RawProyecto, RawItem, RawGasto,
+  RawMovR, RawMovP, RawProyecto, RawItem, RawGasto, RawFacturaProyecto,
 } from './types'
 
 export const revalidate = 300
@@ -43,6 +43,7 @@ export default async function InicioPage() {
     clientesRes,
     proveedoresRes,
     gastosChartRes,
+    facturasRes,
   ] = await Promise.all([
     mcTable
       .select('tipo, monto, fecha_real')
@@ -59,7 +60,7 @@ export default async function InicioPage() {
       .order('fecha_generada', { ascending: false })
       .limit(4),
     supabase.from('proyectos')
-      .select('id, nombre, tipo, estado, fecha_inicio, cliente:clientes(id, nombre)')
+      .select('id, nombre, tipo, estado, fase, fecha_inicio, cliente:clientes(id, nombre)')
       .order('created_at', { ascending: false }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase.from('proyecto_items' as never) as any)
@@ -72,15 +73,18 @@ export default async function InicioPage() {
       .select('id, razon_social, nombre_comercial')
       .order('razon_social', { ascending: true }),
     supabase.from('gastos')
-      .select('neto_a_pagar, fecha_comprobante')
+      .select('neto_a_pagar, fecha_comprobante, estado_pago')
       .gte('fecha_comprobante', thirteenMonthsAgoStart),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from('facturas_proyecto' as never) as any)
+      .select('proyecto_id, subtotal, estado'),
   ])
 
   const NIVEL_ORDER: Record<string, number> = { critico: 0, advertencia: 1, informativo: 2 }
   const alertas: AlertaItem[] = ((alertasRes.data ?? []) as AlertaItem[])
     .sort((a, b) => (NIVEL_ORDER[a.nivel] ?? 3) - (NIVEL_ORDER[b.nivel] ?? 3))
 
-  const proyectos   = (proyectosRes.data   ?? []) as RawProyecto[]
+  const proyectos   = (proyectosRes.data   ?? []) as unknown as RawProyecto[]
   const clientes    = (clientesRes.data    ?? []) as ClienteOpt[]
   const proveedores = (proveedoresRes.data ?? []) as ProveedorOpt[]
   const proyectosOpts: ProyectoOpt[] = proyectos
@@ -100,6 +104,7 @@ export default async function InicioPage() {
       movRealizadosRaw={(realizedRes.data ?? []) as RawMovR[]}
       movPendientesRaw={(pendingRes.data  ?? []) as RawMovP[]}
       gastosChartRaw={(gastosChartRes.data ?? []) as RawGasto[]}
+      facturasRaw={(facturasRes.data ?? []) as RawFacturaProyecto[]}
       limaYear={limaYear}
       limaMonth={limaMonth}
       todayStr={todayStr}
