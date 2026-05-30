@@ -45,6 +45,24 @@ export interface DistribucionItem {
 }
 export interface SaludData { score: number; subtitle: string }
 
+export interface FacturaPendiente {
+  id: string
+  subtotal: number
+  estado: string
+  fecha_vencimiento: string | null
+  numero_factura: string | null
+  proyecto: { id: string; nombre: string; cliente: { nombre: string } | null } | null
+}
+
+export interface GastoPendiente {
+  id: string
+  concepto: string
+  neto_a_pagar: number
+  tipo_comprobante: string
+  proyecto: { id: string; nombre: string } | null
+  proveedor: { razon_social: string; nombre_comercial: string | null } | null
+}
+
 export const TIPO_CFG: Record<string, { label: string; color: string }> = {
   digital:     { label: 'Digital',      color: '#1e40af' },
   instalacion: { label: 'Instalación',  color: '#f97316' },

@@ -14,11 +14,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { cn, formatMoney } from '@/lib/utils'
+import { cn, formatMoney, formatDate } from '@/lib/utils'
 import type {
   AlertaItem, ClienteOpt, ProveedorOpt, ProyectoOpt,
   RawMovR, RawMovP, RawProyecto, RawItem, RawGasto, RawFacturaProyecto,
   ChartDataPoint, KpiData, ProyectoRentabilidad, DistribucionItem, SaludData,
+  FacturaPendiente, GastoPendiente,
 } from './types'
 import { TIPO_CFG } from './types'
 import { GastoSheet, NuevoProyectoDialog } from '@/components/forms/create-dialogs'
@@ -53,6 +54,8 @@ interface Props {
   movPendientesRaw: RawMovP[]
   gastosChartRaw: RawGasto[]
   facturasRaw: RawFacturaProyecto[]
+  facturasPendientes: FacturaPendiente[]
+  gastosPendientes: GastoPendiente[]
   limaYear: number
   limaMonth: number  // 0-indexed
   todayStr: string
@@ -953,12 +956,172 @@ function SaludCard({ data }: { data: SaludData }) {
 }
 
 
+// ── Pendientes Section ────────────────────────────────────────────────────────
+
+const TIPO_COMP_LABEL: Record<string, string> = {
+  factura: 'Factura', boleta: 'Boleta', rxh: 'RxH', sin_comprobante: 'Sin comp.',
+}
+
+function FacturaPendienteRow({ factura, todayStr }: { factura: FacturaPendiente; todayStr: string }) {
+  const daysUntil = factura.fecha_vencimiento
+    ? Math.round((new Date(factura.fecha_vencimiento + 'T00:00:00').getTime() - new Date(todayStr + 'T00:00:00').getTime()) / 86400000)
+    : null
+
+  const badge =
+    daysUntil === null ? null
+    : daysUntil < 0   ? { label: 'Vencida',           cls: 'bg-red-100 text-red-700' }
+    : daysUntil <= 7  ? { label: `Vence en ${daysUntil}d`, cls: 'bg-amber-100 text-amber-700' }
+    :                   { label: `Vence en ${daysUntil}d`, cls: 'bg-zinc-100 text-zinc-500' }
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-2.5 border-b border-zinc-50 last:border-0">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+          {factura.numero_factura && (
+            <span className="font-mono text-xs text-zinc-500">{factura.numero_factura}</span>
+          )}
+          {badge && (
+            <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded-full', badge.cls)}>
+              {badge.label}
+            </span>
+          )}
+        </div>
+        <Link href={factura.proyecto ? `/proyectos/${factura.proyecto.id}` : '#'}
+          className="text-xs font-medium text-zinc-900 hover:underline line-clamp-1">
+          {factura.proyecto?.nombre ?? '—'}
+        </Link>
+        <p className="text-[11px] text-zinc-400">{factura.proyecto?.cliente?.nombre ?? '—'}</p>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-sm font-bold tabular-nums text-emerald-700">{formatMoney(factura.subtotal)}</p>
+        {factura.fecha_vencimiento && (
+          <p className="text-[11px] text-zinc-400">{formatDate(factura.fecha_vencimiento)}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function GastoPendienteRow({ gasto }: { gasto: GastoPendiente }) {
+  const concepto = gasto.concepto.length > 30 ? gasto.concepto.slice(0, 30) + '…' : gasto.concepto
+  const nombreProveedor = gasto.proveedor?.nombre_comercial ?? gasto.proveedor?.razon_social
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-2.5 border-b border-zinc-50 last:border-0">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-zinc-900 line-clamp-1">{concepto}</p>
+        {nombreProveedor && (
+          <p className="text-[11px] text-zinc-400 line-clamp-1">{nombreProveedor}</p>
+        )}
+        {gasto.proyecto && (
+          <Link href={`/proyectos/${gasto.proyecto.id}`}
+            className="text-[11px] text-blue-600 hover:underline line-clamp-1">
+            {gasto.proyecto.nombre}
+          </Link>
+        )}
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-sm font-bold tabular-nums text-zinc-800">{formatMoney(gasto.neto_a_pagar)}</p>
+        <div className="flex items-center gap-1 justify-end mt-1">
+          <span className="text-[10px] text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded">
+            {TIPO_COMP_LABEL[gasto.tipo_comprobante] ?? gasto.tipo_comprobante}
+          </span>
+          <span className="text-[10px] font-medium text-red-700 bg-red-50 px-1.5 py-0.5 rounded">
+            Pendiente
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PendientesSection({
+  facturas, gastos, todayStr,
+}: {
+  facturas: FacturaPendiente[]; gastos: GastoPendiente[]; todayStr: string
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
+      <div className="px-5 py-4 border-b border-zinc-100">
+        <h2 className="text-sm font-semibold text-zinc-900">Pendientes de atención</h2>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-zinc-100">
+        {/* Facturas por cobrar */}
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs font-semibold text-zinc-700">Facturas por cobrar</h3>
+              {facturas.length > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                  {facturas.length}
+                </span>
+              )}
+            </div>
+            <Link href="/facturas?estado=emitida"
+              className="flex items-center gap-0.5 text-xs text-blue-600 hover:underline">
+              Ver todas <ChevronRight size={12} />
+            </Link>
+          </div>
+          {facturas.length === 0 ? (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+              <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+              <p className="text-xs text-emerald-700">Sin facturas pendientes de cobro</p>
+            </div>
+          ) : (
+            <div>
+              {facturas.slice(0, 5).map(f => (
+                <FacturaPendienteRow key={f.id} factura={f} todayStr={todayStr} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Gastos por pagar */}
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs font-semibold text-zinc-700">Gastos por pagar</h3>
+              {gastos.length > 0 && (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                  {gastos.length}
+                </span>
+              )}
+            </div>
+            <Link href="/gastos?estado=pendiente"
+              className="flex items-center gap-0.5 text-xs text-blue-600 hover:underline">
+              Ver todos <ChevronRight size={12} />
+            </Link>
+          </div>
+          {gastos.length === 0 ? (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+              <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+              <p className="text-xs text-emerald-700">Sin gastos pendientes de pago</p>
+            </div>
+          ) : (
+            <div>
+              {gastos.slice(0, 5).map(g => (
+                <GastoPendienteRow key={g.id} gasto={g} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="border-t border-zinc-100 px-5 py-3 text-center">
+        <Link href="/caja" className="text-xs font-medium text-blue-600 hover:underline">
+          Ver todos los pendientes →
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Client Component ────────────────────────────────────────────────────
 
 export function InicioClient({
   saludo, nombre, alertas, clientes, proveedores, proyectosOpts,
   proyectosRaw, itemsRaw, movRealizadosRaw, movPendientesRaw, gastosChartRaw,
-  facturasRaw,
+  facturasRaw, facturasPendientes, gastosPendientes,
   limaYear, limaMonth, todayStr,
 }: Props) {
   const router = useRouter()
@@ -1121,6 +1284,11 @@ export function InicioClient({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <IngresosGastosChart data={chartData} periodo={filters.periodo} />
+          <PendientesSection
+            facturas={facturasPendientes}
+            gastos={gastosPendientes}
+            todayStr={todayStr}
+          />
           <ProfitabilityTable data={rentabilidad} />
         </div>
         <div className="space-y-4">

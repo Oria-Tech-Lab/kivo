@@ -4,6 +4,7 @@ import { InicioClient } from './inicio-client'
 import type {
   AlertaItem, ClienteOpt, ProveedorOpt, ProyectoOpt,
   RawMovR, RawMovP, RawProyecto, RawItem, RawGasto, RawFacturaProyecto,
+  FacturaPendiente, GastoPendiente,
 } from './types'
 
 export const revalidate = 300
@@ -44,6 +45,8 @@ export default async function InicioPage() {
     proveedoresRes,
     gastosChartRes,
     facturasRes,
+    facturasPendientesRes,
+    gastosPendientesRes,
   ] = await Promise.all([
     mcTable
       .select('tipo, monto, fecha_real')
@@ -78,6 +81,20 @@ export default async function InicioPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase.from('facturas_proyecto' as never) as any)
       .select('proyecto_id, subtotal, estado'),
+    // Facturas pendientes con joins para módulo de pendientes
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from('facturas_proyecto' as never) as any)
+      .select('id, subtotal, estado, fecha_vencimiento, numero_factura, proyecto:proyectos(id, nombre, cliente:clientes(nombre))')
+      .in('estado', ['emitida', 'borrador'])
+      .order('fecha_vencimiento', { ascending: true, nullsFirst: false })
+      .limit(10),
+    // Gastos pendientes con joins para módulo de pendientes
+    supabase.from('gastos')
+      .select('id, concepto, neto_a_pagar, tipo_comprobante, proyecto:proyectos(id, nombre), proveedor:proveedores(razon_social, nombre_comercial)')
+      .eq('estado_pago', 'pendiente')
+      .gt('neto_a_pagar', 0)
+      .order('fecha_comprobante', { ascending: true })
+      .limit(10),
   ])
 
   const NIVEL_ORDER: Record<string, number> = { critico: 0, advertencia: 1, informativo: 2 }
@@ -105,6 +122,8 @@ export default async function InicioPage() {
       movPendientesRaw={(pendingRes.data  ?? []) as RawMovP[]}
       gastosChartRaw={(gastosChartRes.data ?? []) as RawGasto[]}
       facturasRaw={(facturasRes.data ?? []) as RawFacturaProyecto[]}
+      facturasPendientes={(facturasPendientesRes.data ?? []) as unknown as FacturaPendiente[]}
+      gastosPendientes={(gastosPendientesRes.data ?? []) as unknown as GastoPendiente[]}
       limaYear={limaYear}
       limaMonth={limaMonth}
       todayStr={todayStr}
