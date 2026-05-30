@@ -13,11 +13,11 @@ import {
   Settings,
   LogOut,
   Landmark,
-  PlusCircle,
   FileCheck,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
+import { CreateMenuButton } from './create-menu-button'
 
 const navItems = [
   { label: 'Inicio',       href: '/inicio',           icon: LayoutDashboard },
@@ -68,15 +68,8 @@ export function Sidebar({ userEmail }: SidebarProps) {
           </div>
         </div>
 
-        {/* ── CTA Registrar Gasto ───────────────────── */}
-        <Link
-          href="/gastos/nuevo"
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
-          style={{ background: '#2563eb' }}
-        >
-          <PlusCircle size={15} className="shrink-0" />
-          Registrar Gasto
-        </Link>
+        {/* ── CTA ＋ Crear ──────────────────────────── */}
+        <CreateMenuButton />
       </div>
 
       {/* ── Navigation ────────────────────────────────── */}
